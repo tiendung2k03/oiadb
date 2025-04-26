@@ -2,9 +2,9 @@ from setuptools import setup, find_packages
 
 setup(
     name='oiadb',
-    version='0.2.1',
+    version='0.3.0',
     packages=find_packages(),
-    description='ADB Python wrapper library with enhanced functionality',
+    description='ADB Python wrapper library with enhanced functionality and image recognition',
     long_description=open('README.md').read(),
     long_description_content_type='text/markdown',
     author='Tien Dung',
@@ -23,9 +23,12 @@ setup(
         'Topic :: Software Development :: Testing',
         'Topic :: Software Development :: Libraries',
     ],
-    keywords='adb, android, debug, bridge, automation, testing',
+    keywords='adb, android, debug, bridge, automation, testing, image recognition, opencv',
     python_requires='>=3.6',
-    install_requires=[],
+    install_requires=[
+        'opencv-python>=4.5.0',
+        'numpy>=1.19.0',
+    ],
     project_urls={
         'Bug Reports': 'https://github.com/tiendung102k3/oiadb/issues',
         'Source': 'https://github.com/tiendung102k3/oiadb',

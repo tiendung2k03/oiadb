@@ -1,15 +1,17 @@
 # My ADB Lib
 
-Thư viện Python wrapper cho Android Debug Bridge (ADB) không yêu cầu phụ thuộc bên ngoài.
+Thư viện Python wrapper cho Android Debug Bridge (ADB) với chức năng nhận diện hình ảnh sử dụng OpenCV.
 
 ## Giới thiệu
 
-My ADB Lib là một thư viện Python giúp tương tác với thiết bị Android thông qua ADB (Android Debug Bridge). Thư viện này được thiết kế để đơn giản hóa việc sử dụng các lệnh ADB trong các ứng dụng Python, tự động hóa kiểm thử, và quản lý thiết bị Android.
+My ADB Lib là một thư viện Python giúp tương tác với thiết bị Android thông qua ADB (Android Debug Bridge). Thư viện này được thiết kế để đơn giản hóa việc sử dụng các lệnh ADB trong các ứng dụng Python, tự động hóa kiểm thử, và quản lý thiết bị Android. Phiên bản mới nhất bổ sung chức năng nhận diện hình ảnh mạnh mẽ sử dụng OpenCV, cho phép tìm kiếm và tương tác với các phần tử trên màn hình dựa trên hình ảnh mẫu thay vì tọa độ cố định.
 
 ## Yêu cầu
 
 - Python 3.6 trở lên
 - ADB đã được cài đặt và có trong PATH
+- OpenCV (tự động cài đặt khi cài đặt thư viện)
+- NumPy (tự động cài đặt khi cài đặt thư viện)
 
 ## Cài đặt
 
@@ -74,6 +76,25 @@ interaction.text_input("Hello World")
 interaction.home()
 ```
 
+### Tương tác dựa trên nhận diện hình ảnh
+
+```python
+from oiadb.commands import image_interaction
+
+# Tìm và nhấp vào hình ảnh
+image_interaction.tap_image("/path/to/button.png", threshold=0.8)
+
+# Đợi hình ảnh xuất hiện và nhấp vào
+image_interaction.wait_and_tap_image("/path/to/button.png", timeout=10)
+
+# Kiểm tra xem hình ảnh có xuất hiện không
+if image_interaction.is_image_present("/path/to/element.png"):
+    print("Hình ảnh xuất hiện trên màn hình")
+
+# Kéo từ hình ảnh này đến hình ảnh khác
+image_interaction.drag_image_to_image("/path/to/source.png", "/path/to/target.png")
+```
+
 ### Quản lý file
 
 ```python
@@ -127,8 +148,13 @@ Các module lệnh chuyên biệt:
 - `device_info`: Thông tin thiết bị
 - `file_ops`: Thao tác file
 - `interaction`: Tương tác với thiết bị
+- `image_interaction`: Tương tác dựa trên nhận diện hình ảnh
 - `logs`: Xem log thiết bị
 - `permissions`: Quản lý quyền
+
+### Tài liệu bổ sung
+
+Để biết thêm chi tiết về chức năng nhận diện hình ảnh, vui lòng xem file `image_recognition_documentation.md`.
 
 ## Đóng góp
 
