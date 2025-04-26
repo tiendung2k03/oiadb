@@ -2,7 +2,7 @@
 
 ## 1. Tổng quan
 
-Thư viện My ADB Lib đã được cải tiến đáng kể với nhiều tính năng mới, cải thiện xử lý lỗi, tài liệu hướng dẫn chi tiết, và tối ưu hóa hiệu suất. Dưới đây là tổng hợp các thay đổi chính đã được thực hiện.
+Thư viện OIADB đã được cải tiến đáng kể với nhiều tính năng mới, cải thiện xử lý lỗi, tài liệu hướng dẫn chi tiết, và tối ưu hóa hiệu suất. Dưới đây là tổng hợp các thay đổi chính đã được thực hiện.
 
 ## 2. Cải thiện tài liệu hướng dẫn
 
@@ -131,4 +131,4 @@ Thư viện My ADB Lib đã được cải tiến đáng kể với nhiều tín
 
 ## 7. Kết luận
 
-Thư viện My ADB Lib đã được cải tiến đáng kể với nhiều tính năng mới, xử lý lỗi tốt hơn, tài liệu hướng dẫn chi tiết, và hiệu suất được tối ưu hóa. Các thay đổi này giúp thư viện trở nên mạnh mẽ, linh hoạt, và dễ sử dụng hơn cho các nhà phát triển.
+Thư viện OIADB đã được cải tiến đáng kể với nhiều tính năng mới, xử lý lỗi tốt hơn, tài liệu hướng dẫn chi tiết, và hiệu suất được tối ưu hóa. Các thay đổi này giúp thư viện trở nên mạnh mẽ, linh hoạt, và dễ sử dụng hơn cho các nhà phát triển.

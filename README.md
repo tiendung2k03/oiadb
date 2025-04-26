@@ -14,14 +14,14 @@ My ADB Lib là một thư viện Python giúp tương tác với thiết bị An
 ## Cài đặt
 
 ```bash
-pip install my-adb-lib
+pip install oiadb
 ```
 
 Hoặc cài đặt từ mã nguồn:
 
 ```bash
-git clone https://github.com/yourusername/my-adb-lib.git
-cd my-adb-lib
+git clone https://github.com/tiendung102k3/oiadb
+cd oiadb
 pip install -e .
 ```
 
@@ -30,7 +30,7 @@ pip install -e .
 ### Khởi tạo
 
 ```python
-from my_adb_lib import MyADB
+from oiadb import MyADB
 
 # Khởi tạo với thiết bị mặc định
 adb = MyADB()
@@ -59,7 +59,7 @@ adb.reboot_device()
 ### Tương tác với thiết bị
 
 ```python
-from my_adb_lib.commands import interaction
+from oiadb.commands import interaction
 
 # Nhấn vào tọa độ màn hình
 interaction.tap(500, 500)
@@ -77,7 +77,7 @@ interaction.home()
 ### Quản lý file
 
 ```python
-from my_adb_lib.commands import file_ops
+from oiadb.commands import file_ops
 
 # Đẩy file từ máy tính lên thiết bị
 file_ops.push("/path/on/computer", "/path/on/device")
@@ -89,7 +89,7 @@ file_ops.pull("/path/on/device", "/path/on/computer")
 ### Xem log
 
 ```python
-from my_adb_lib.commands import logs
+from oiadb.commands import logs
 
 # Xem logcat
 logcat_output = logs.logcat()
