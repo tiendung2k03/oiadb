@@ -1,0 +1,49 @@
+digraph OIADB_Architecture {
+    rankdir=TB;
+    node [shape=box, style=filled, fillcolor=lightblue, fontname="Arial"];
+    edge [fontname="Arial"];
+    
+    // Main components
+    MyADB [label="MyADB\n(adb.py)", fillcolor=lightgreen];
+    
+    // Command modules
+    Commands [label="Commands\n(commands/)", fillcolor=lightyellow];
+    AppInfo [label="app_info.py"];
+    Apps [label="apps.py"];
+    Basic [label="basic.py"];
+    Connect [label="connect.py"];
+    DeviceActions [label="device_actions.py"];
+    DeviceInfo [label="device_info.py"];
+    FileOps [label="file_ops.py"];
+    ImageInteraction [label="image_interaction.py", fillcolor=lightpink];
+    Interaction [label="interaction.py"];
+    Logs [label="logs.py"];
+    Permissions [label="permissions.py"];
+    
+    // Utility modules
+    Utils [label="Utils\n(utils/)", fillcolor=lightyellow];
+    Advanced [label="advanced.py"];
+    ImageRecognition [label="image_recognition.py", fillcolor=lightpink];
+    Runner [label="runner.py"];
+    
+    // Exceptions
+    Exceptions [label="Exceptions\n(exceptions.py)"];
+    
+    // Relationships
+    MyADB -> Commands [label="uses"];
+    MyADB -> Utils [label="uses"];
+    MyADB -> Exceptions [label="throws"];
+    
+    Commands -> {AppInfo, Apps, Basic, Connect, DeviceActions, DeviceInfo, FileOps, ImageInteraction, Interaction, Logs, Permissions} [label="contains"];
+    Utils -> {Advanced, ImageRecognition, Runner} [label="contains"];
+    
+    ImageInteraction -> ImageRecognition [label="uses"];
+    
+    // External dependencies
+    OpenCV [label="OpenCV", shape=ellipse, fillcolor=lightgrey];
+    NumPy [label="NumPy", shape=ellipse, fillcolor=lightgrey];
+    ADB [label="Android Debug Bridge", shape=ellipse, fillcolor=lightgrey];
+    
+    ImageRecognition -> {OpenCV, NumPy} [label="depends on"];
+    Runner -> ADB [label="executes"];
+}
