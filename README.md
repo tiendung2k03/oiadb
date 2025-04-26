@@ -154,7 +154,7 @@ Các module lệnh chuyên biệt:
 
 ### Tài liệu bổ sung
 
-Để biết thêm chi tiết về chức năng nhận diện hình ảnh, vui lòng xem file `image_recognition_documentation.md`.
+Để biết thêm chi tiết về chức năng nhận diện hình ảnh, vui lòng xem [Tài liệu hướng dẫn](https://github.com/tiendung102k3/oiadb/tree/main/docs).
 
 ## Đóng góp
 
