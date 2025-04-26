@@ -153,8 +153,8 @@ Các module lệnh chuyên biệt:
 - `permissions`: Quản lý quyền
 
 ### Tài liệu bổ sung
-
-Để biết thêm chi tiết về chức năng nhận diện hình ảnh, vui lòng xem [Tài liệu hướng dẫn](https://github.com/tiendung102k3/oiadb/tree/main/docs).
+Đọc tài liệu [tại đây](https://github.com/tiendung102k3/oiadb/tree/main/docs)
+Để biết thêm chi tiết về chức năng nhận diện hình ảnh, vui lòng xem [image_recognition_documentation.md](https://github.com/tiendung102k3/oiadb/blob/main/image_recognition_documentation.md).
 
 ## Đóng góp
 
