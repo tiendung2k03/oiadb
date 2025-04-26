@@ -163,3 +163,7 @@ Các module lệnh chuyên biệt:
 ## Giấy phép
 
 MIT License
+
+## Liên hệ hợp tác
+
+Email: monstertattoovn696@gmail.com
