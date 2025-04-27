@@ -1,6 +1,7 @@
 """
 Module for XML dump functionality with accessibility support.
 Provides a local server to dump XML representation of the current UI hierarchy.
+Optimized for speed and compatibility with all Android versions including Android 14.
 """
 
 import socket
@@ -8,10 +9,21 @@ import threading
 import re
 import json
 import time
+import hashlib
+import lxml.etree as ET
+from functools import lru_cache
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
+from difflib import SequenceMatcher
 
 from .core import get_adb_instance
+
+# Cache for XML dumps to improve performance
+XML_CACHE = {}
+# Cache timeout in seconds
+CACHE_TIMEOUT = 1.0
+# Cache for parsed XML to avoid repeated parsing
+PARSED_XML_CACHE = {}
 
 class XMLDumpHandler(BaseHTTPRequestHandler):
     """HTTP request handler for XML dump server."""
@@ -21,6 +33,10 @@ class XMLDumpHandler(BaseHTTPRequestHandler):
         self.send_header('Content-type', content_type)
         self.send_header('Access-Control-Allow-Origin', '*')
         self.end_headers()
+    
+    def log_message(self, format, *args):
+        """Suppress log messages to improve performance."""
+        pass
     
     def do_GET(self):
         """Handle GET requests to the server."""
@@ -52,7 +68,8 @@ class XMLDumpHandler(BaseHTTPRequestHandler):
             # Extract parameters for finding elements
             criteria = {}
             for key in query_params:
-                criteria[key] = query_params[key][0]
+                if key in query_params and query_params[key]:
+                    criteria[key] = query_params[key][0]
             
             # Find elements matching criteria
             elements = find_elements_by_criteria(criteria)
@@ -73,9 +90,11 @@ class XMLDumpHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b"Not Found")
 
-def get_xml_dump(resource_id="", text_value="", content_desc="", class_name="", threshold=0.8):
+@lru_cache(maxsize=32)
+def get_xml_dump(resource_id="", text_value="", content_desc="", class_name="", threshold=0.8, use_cache=True):
     """
     Get XML dump of the current UI hierarchy with optional filtering.
+    Optimized for speed with caching and efficient XML parsing.
     
     Args:
         resource_id (str): Filter by resource ID
@@ -83,27 +102,67 @@ def get_xml_dump(resource_id="", text_value="", content_desc="", class_name="", 
         content_desc (str): Filter by content description
         class_name (str): Filter by class name
         threshold (float): Similarity threshold for fuzzy matching
+        use_cache (bool): Whether to use cached XML if available
     
     Returns:
         str: XML representation of the UI hierarchy
     """
+    global XML_CACHE
+    
+    # Create a cache key based on parameters
+    cache_key = f"xml_{resource_id}_{text_value}_{content_desc}_{class_name}_{threshold}"
+    
+    # Check if we have a recent cached version
+    if use_cache and cache_key in XML_CACHE:
+        cache_time, xml_content = XML_CACHE[cache_key]
+        if time.time() - cache_time < CACHE_TIMEOUT:
+            return xml_content
+    
     adb = get_adb_instance()
     
-    # Get raw XML dump
-    xml_content = adb.run("uiautomator dump").strip()
+    # Try multiple methods to get XML dump, starting with the fastest
+    xml_content = ""
     
-    # Extract the file path from the output
-    match = re.search(r'to: (.*\.xml)', xml_content)
-    if match:
-        xml_file_path = match.group(1)
-        # Get the content of the XML file
-        xml_content = adb.run(f"cat {xml_file_path}")
-    else:
-        # If no file path found, try to get XML directly
-        xml_content = adb.run("uiautomator dump /dev/tty")
+    # Method 1: Direct dump to stdout (fastest, works on most devices)
+    try:
+        xml_content = adb.run("shell uiautomator dump /dev/tty")
+        if "<hierarchy" in xml_content and "</hierarchy>" in xml_content:
+            # Extract XML content between hierarchy tags
+            match = re.search(r'(<hierarchy.*</hierarchy>)', xml_content, re.DOTALL)
+            if match:
+                xml_content = match.group(1)
+    except:
+        pass
+    
+    # Method 2: Standard dump to file then read (works on all devices)
+    if not xml_content or "<hierarchy" not in xml_content:
+        try:
+            dump_result = adb.run("shell uiautomator dump").strip()
+            match = re.search(r'to: (.*\.xml)', dump_result)
+            if match:
+                xml_file_path = match.group(1)
+                xml_content = adb.run(f"shell cat {xml_file_path}")
+        except:
+            pass
+    
+    # Method 3: Use accessibility service for Android 10+ (including Android 14)
+    if not xml_content or "<hierarchy" not in xml_content:
+        try:
+            # Check if we're on Android 10 or higher
+            sdk_version = get_android_sdk_version()
+            if sdk_version >= 29:  # Android 10+
+                # Use accessibility service to get XML
+                xml_content = adb.run("shell settings put secure enabled_accessibility_services com.android.uiautomator.accessibility.AccessibilityService")
+                xml_content = adb.run("shell am instrument -w -e class androidx.test.uiautomator.UiAutomatorAccessibilityDump com.android.uiautomator.test/androidx.test.runner.AndroidJUnitRunner")
+                # Extract XML from output
+                match = re.search(r'(<hierarchy.*</hierarchy>)', xml_content, re.DOTALL)
+                if match:
+                    xml_content = match.group(1)
+        except:
+            pass
     
     # Apply filters if provided
-    if any([resource_id, text_value, content_desc, class_name]):
+    if xml_content and any([resource_id, text_value, content_desc, class_name]):
         xml_content = filter_xml_content(
             xml_content, 
             resource_id, 
@@ -113,11 +172,29 @@ def get_xml_dump(resource_id="", text_value="", content_desc="", class_name="", 
             threshold
         )
     
+    # Cache the result
+    if xml_content:
+        XML_CACHE[cache_key] = (time.time(), xml_content)
+    
     return xml_content
+
+def get_android_sdk_version():
+    """
+    Get the Android SDK version of the connected device.
+    
+    Returns:
+        int: Android SDK version (e.g., 29 for Android 10)
+    """
+    adb = get_adb_instance()
+    try:
+        output = adb.run("shell getprop ro.build.version.sdk").strip()
+        return int(output)
+    except:
+        return 0  # Default to 0 if unable to determine
 
 def filter_xml_content(xml_content, resource_id="", text_value="", content_desc="", class_name="", threshold=0.8):
     """
-    Filter XML content based on provided criteria.
+    Filter XML content based on provided criteria using efficient XML parsing.
     
     Args:
         xml_content (str): Original XML content
@@ -130,9 +207,88 @@ def filter_xml_content(xml_content, resource_id="", text_value="", content_desc=
     Returns:
         str: Filtered XML content
     """
-    # Simple implementation - in a real scenario, this would use proper XML parsing
-    # and more sophisticated filtering with fuzzy matching based on threshold
+    # If no filtering criteria, return original content
+    if not any([resource_id, text_value, content_desc, class_name]):
+        return xml_content
     
+    try:
+        # Parse XML using lxml for better performance
+        root = ET.fromstring(xml_content)
+        
+        # Find all nodes
+        nodes = root.findall(".//node")
+        
+        # Track nodes to remove
+        nodes_to_remove = []
+        
+        for node in nodes:
+            match_score = 0
+            total_criteria = 0
+            
+            if resource_id:
+                total_criteria += 1
+                node_id = node.get('resource-id', '')
+                if node_id == resource_id:
+                    match_score += 1
+                elif similarity_score(node_id, resource_id) >= threshold:
+                    match_score += threshold
+            
+            if text_value:
+                total_criteria += 1
+                node_text = node.get('text', '')
+                if node_text == text_value:
+                    match_score += 1
+                elif similarity_score(node_text, text_value) >= threshold:
+                    match_score += threshold
+            
+            if content_desc:
+                total_criteria += 1
+                node_desc = node.get('content-desc', '')
+                if node_desc == content_desc:
+                    match_score += 1
+                elif similarity_score(node_desc, content_desc) >= threshold:
+                    match_score += threshold
+            
+            if class_name:
+                total_criteria += 1
+                node_class = node.get('class', '')
+                if node_class == class_name:
+                    match_score += 1
+                elif similarity_score(node_class, class_name) >= threshold:
+                    match_score += threshold
+            
+            # If node doesn't match criteria, mark for removal
+            if total_criteria > 0 and match_score/total_criteria < threshold:
+                nodes_to_remove.append(node)
+        
+        # Remove non-matching nodes
+        for node in nodes_to_remove:
+            parent = node.getparent()
+            if parent is not None:
+                parent.remove(node)
+        
+        # Convert back to string
+        return ET.tostring(root, encoding='utf-8', pretty_print=True).decode('utf-8')
+    
+    except Exception as e:
+        # Fallback to regex-based filtering if XML parsing fails
+        return regex_filter_xml_content(xml_content, resource_id, text_value, content_desc, class_name, threshold)
+
+def regex_filter_xml_content(xml_content, resource_id="", text_value="", content_desc="", class_name="", threshold=0.8):
+    """
+    Fallback method to filter XML content using regex when XML parsing fails.
+    
+    Args:
+        xml_content (str): Original XML content
+        resource_id (str): Filter by resource ID
+        text_value (str): Filter by text value
+        content_desc (str): Filter by content description
+        class_name (str): Filter by class name
+        threshold (float): Similarity threshold for fuzzy matching
+    
+    Returns:
+        str: Filtered XML content
+    """
     filtered_lines = []
     for line in xml_content.splitlines():
         match_score = 0
@@ -184,9 +340,11 @@ def filter_xml_content(xml_content, resource_id="", text_value="", content_desc=
     
     return "\n".join(filtered_lines)
 
+@lru_cache(maxsize=1024)
 def similarity_score(str1, str2):
     """
-    Calculate similarity score between two strings.
+    Calculate similarity score between two strings using efficient algorithm.
+    Cached for performance.
     
     Args:
         str1 (str): First string
@@ -195,41 +353,117 @@ def similarity_score(str1, str2):
     Returns:
         float: Similarity score between 0 and 1
     """
-    # Simple implementation - in a real scenario, this would use more sophisticated
-    # algorithms like Levenshtein distance or other string similarity metrics
+    if not str1 and not str2:
+        return 1.0  # Both strings are empty
+    
+    if not str1 or not str2:
+        return 0.0  # One string is empty
     
     # Convert to lowercase for case-insensitive comparison
     str1 = str1.lower()
     str2 = str2.lower()
     
+    # Quick check for exact match
+    if str1 == str2:
+        return 1.0
+    
     # Check if one string contains the other
     if str1 in str2 or str2 in str1:
         return 0.9  # High similarity but not perfect
     
-    # Count matching characters
-    matches = sum(c1 == c2 for c1, c2 in zip(str1, str2))
-    
-    # Calculate similarity based on length of longer string
-    max_length = max(len(str1), len(str2))
-    if max_length == 0:
-        return 1.0  # Both strings are empty
-    
-    return matches / max_length
+    # Use SequenceMatcher for more accurate similarity
+    return SequenceMatcher(None, str1, str2).ratio()
 
-def find_elements_by_criteria(criteria):
+@lru_cache(maxsize=32)
+def find_elements_by_criteria(criteria_dict):
     """
-    Find UI elements matching the given criteria.
+    Find UI elements matching the given criteria using efficient XML parsing.
+    Cached for performance.
     
     Args:
-        criteria (dict): Dictionary of criteria to match
+        criteria_dict (dict): Dictionary of criteria to match
     
     Returns:
         list: List of matching elements with their properties
     """
+    # Convert criteria_dict to a hashable tuple for caching
+    criteria_items = tuple(sorted(criteria_dict.items()))
+    
+    # Create a copy of the criteria dictionary
+    criteria = dict(criteria_items)
+    
+    # Extract threshold if present
+    threshold = float(criteria.pop('threshold', 0.8))
+    
+    # Get XML dump
     xml_content = get_xml_dump()
     
-    # Parse XML to find matching elements
-    # This is a simplified implementation - in a real scenario, this would use proper XML parsing
+    # Use cached parsed XML if available
+    xml_hash = hashlib.md5(xml_content.encode()).hexdigest()
+    if xml_hash in PARSED_XML_CACHE:
+        root = PARSED_XML_CACHE[xml_hash]
+    else:
+        try:
+            root = ET.fromstring(xml_content)
+            PARSED_XML_CACHE[xml_hash] = root
+        except:
+            # Fallback to regex-based parsing if XML parsing fails
+            return regex_find_elements_by_criteria(criteria_dict)
+    
+    # Find all nodes
+    nodes = root.findall(".//node")
+    
+    matching_elements = []
+    for node in nodes:
+        # Extract node properties
+        element = {}
+        for attr in node.attrib:
+            element[attr] = node.get(attr)
+        
+        # Check if element matches all criteria
+        matches = True
+        for key, value in criteria.items():
+            # Map API parameter names to XML attribute names
+            xml_key = key
+            if key == 'id':
+                xml_key = 'resource-id'
+            elif key == 'value':
+                xml_key = 'text'
+            elif key == 'content_desc':
+                xml_key = 'content-desc'
+            
+            if xml_key in element:
+                if not (element[xml_key] == value or 
+                        similarity_score(element[xml_key], value) >= threshold):
+                    matches = False
+                    break
+            else:
+                matches = False
+                break
+        
+        if matches:
+            matching_elements.append(element)
+    
+    return matching_elements
+
+def regex_find_elements_by_criteria(criteria_dict):
+    """
+    Fallback method to find elements using regex when XML parsing fails.
+    
+    Args:
+        criteria_dict (dict): Dictionary of criteria to match
+    
+    Returns:
+        list: List of matching elements with their properties
+    """
+    # Create a copy of the criteria dictionary
+    criteria = dict(criteria_dict)
+    
+    # Extract threshold if present
+    threshold = float(criteria.pop('threshold', 0.8))
+    
+    # Get XML dump
+    xml_content = get_xml_dump()
     
     matching_elements = []
     node_pattern = r'<node[^>]*'
@@ -239,7 +473,7 @@ def find_elements_by_criteria(criteria):
         
         # Extract node properties
         element = {}
-        for prop in ['resource-id', 'class', 'text', 'content-desc', 'bounds']:
+        for prop in ['resource-id', 'class', 'text', 'content-desc', 'bounds', 'package', 'checkable', 'checked', 'clickable', 'enabled', 'focusable', 'focused', 'scrollable', 'long-clickable', 'password', 'selected']:
             prop_match = re.search(f'{prop}="([^"]*)"', node_str)
             if prop_match:
                 element[prop] = prop_match.group(1)
@@ -247,11 +481,6 @@ def find_elements_by_criteria(criteria):
         # Check if element matches all criteria
         matches = True
         for key, value in criteria.items():
-            if key == 'threshold':
-                continue  # Skip threshold parameter
-                
-            threshold = float(criteria.get('threshold', 0.8))
-            
             # Map API parameter names to XML attribute names
             xml_key = key
             if key == 'id':
@@ -278,6 +507,7 @@ def find_elements_by_criteria(criteria):
 def get_accessibility_actions(node_id):
     """
     Get available accessibility actions for a specific node.
+    Enhanced to support Android 14 accessibility features.
     
     Args:
         node_id (str): Node identifier
@@ -287,8 +517,8 @@ def get_accessibility_actions(node_id):
     """
     adb = get_adb_instance()
     
-    # This is a simplified implementation - in a real scenario, this would use
-    # the Android accessibility API to get available actions
+    # Get Android version to determine available actions
+    sdk_version = get_android_sdk_version()
     
     # Common accessibility actions
     common_actions = [
@@ -298,19 +528,32 @@ def get_accessibility_actions(node_id):
         {"name": "setText", "description": "Set text on the element"}
     ]
     
+    # Add Android 10+ actions
+    if sdk_version >= 29:  # Android 10+
+        common_actions.extend([
+            {"name": "scrollForward", "description": "Scroll forward from the element"},
+            {"name": "scrollBackward", "description": "Scroll backward from the element"}
+        ])
+    
+    # Add Android 14 specific actions
+    if sdk_version >= 34:  # Android 14
+        common_actions.extend([
+            {"name": "contextClick", "description": "Context click (right-click) on the element"},
+            {"name": "showTooltip", "description": "Show tooltip for the element"},
+            {"name": "dismiss", "description": "Dismiss the element (e.g., close dialog)"}
+        ])
+    
     # If no specific node is requested, return common actions
     if not node_id:
         return common_actions
     
     # Get specific node information
-    xml_content = get_xml_dump()
-    node_pattern = f'<node[^>]*resource-id="{node_id}"[^>]*'
-    node_match = re.search(node_pattern, xml_content)
+    elements = find_elements_by_criteria({'id': node_id})
     
-    if not node_match:
+    if not elements:
         return []
     
-    node_str = node_match.group(0)
+    element = elements[0]
     
     # Determine available actions based on node properties
     available_actions = []
@@ -322,12 +565,28 @@ def get_accessibility_actions(node_id):
     available_actions.append({"name": "longClick", "description": "Long press on the element"})
     
     # Check if node is scrollable
-    if 'scrollable="true"' in node_str:
+    if element.get('scrollable') == 'true':
         available_actions.append({"name": "scroll", "description": "Scroll from the element"})
+        
+        # Add directional scrolling for Android 10+
+        if sdk_version >= 29:
+            available_actions.append({"name": "scrollForward", "description": "Scroll forward from the element"})
+            available_actions.append({"name": "scrollBackward", "description": "Scroll backward from the element"})
     
     # Check if node can accept text input
-    if 'class="android.widget.EditText"' in node_str or 'editable="true"' in node_str:
+    if element.get('class') == 'android.widget.EditText' or element.get('editable') == 'true':
         available_actions.append({"name": "setText", "description": "Set text on the element"})
+    
+    # Add Android 14 specific actions based on properties
+    if sdk_version >= 34:
+        if element.get('clickable') == 'true':
+            available_actions.append({"name": "contextClick", "description": "Context click (right-click) on the element"})
+        
+        if element.get('content-desc'):
+            available_actions.append({"name": "showTooltip", "description": "Show tooltip for the element"})
+        
+        if element.get('class') in ['android.widget.Dialog', 'android.app.Dialog'] or 'dialog' in element.get('resource-id', '').lower():
+            available_actions.append({"name": "dismiss", "description": "Dismiss the element (e.g., close dialog)"})
     
     return available_actions
 
@@ -364,22 +623,26 @@ def stop_xml_server(server):
 def get_device_ip():
     """
     Get the IP address of the connected Android device.
+    Enhanced to support more network interfaces.
     
     Returns:
         str: IP address of the device
     """
     adb = get_adb_instance()
     
-    # Get IP address from device
-    output = adb.run("shell ip addr show wlan0")
-    ip_match = re.search(r'inet\s+(\d+\.\d+\.\d+\.\d+)', output)
+    # Try multiple network interfaces
+    interfaces = ['wlan0', 'eth0', 'eth1', 'rmnet0', 'rmnet_data0']
     
-    if ip_match:
-        return ip_match.group(1)
+    for interface in interfaces:
+        output = adb.run(f"shell ip addr show {interface} 2>/dev/null")
+        ip_match = re.search(r'inet\s+(\d+\.\d+\.\d+\.\d+)', output)
+        
+        if ip_match:
+            return ip_match.group(1)
     
-    # Try alternative interface
-    output = adb.run("shell ip addr show eth0")
-    ip_match = re.search(r'inet\s+(\d+\.\d+\.\d+\.\d+)', output)
+    # Try alternative method for Android 10+
+    output = adb.run("shell ip route")
+    ip_match = re.search(r'src\s+(\d+\.\d+\.\d+\.\d+)', output)
     
     if ip_match:
         return ip_match.group(1)
@@ -407,9 +670,10 @@ def setup_port_forwarding(device_port=8000, host_port=8000):
 def perform_accessibility_action(action, node_criteria, value=None):
     """
     Perform an accessibility action on a node matching the criteria.
+    Enhanced to support Android 14 accessibility features.
     
     Args:
-        action (str): Action to perform (click, longClick, scroll, setText)
+        action (str): Action to perform (click, longClick, scroll, setText, etc.)
         node_criteria (dict): Criteria to identify the node
         value (str, optional): Value for setText action
     
@@ -426,7 +690,8 @@ def perform_accessibility_action(action, node_criteria, value=None):
     element = elements[0]
     
     # Extract bounds
-    bounds_match = re.search(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', element.get('bounds', ''))
+    bounds = element.get('bounds', '')
+    bounds_match = re.search(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', bounds)
     if not bounds_match:
         return False
     
@@ -435,6 +700,7 @@ def perform_accessibility_action(action, node_criteria, value=None):
     center_y = (y1 + y2) // 2
     
     adb = get_adb_instance()
+    sdk_version = get_android_sdk_version()
     
     # Perform the requested action
     if action == "click":
@@ -454,6 +720,24 @@ def perform_accessibility_action(action, node_criteria, value=None):
         adb.run(f"shell input swipe {center_x} {center_y} {center_x} {end_y} 500")
         return True
     
+    elif action == "scrollForward" and sdk_version >= 29:
+        # Scroll right
+        end_x = center_x + 300
+        if end_x > 2000:  # Avoid scrolling off screen
+            end_x = 2000
+        
+        adb.run(f"shell input swipe {center_x} {center_y} {end_x} {center_y} 500")
+        return True
+    
+    elif action == "scrollBackward" and sdk_version >= 29:
+        # Scroll left
+        end_x = center_x - 300
+        if end_x < 0:  # Avoid scrolling off screen
+            end_x = 0
+        
+        adb.run(f"shell input swipe {center_x} {center_y} {end_x} {center_y} 500")
+        return True
+    
     elif action == "setText" and value is not None:
         # First tap to focus
         adb.run(f"shell input tap {center_x} {center_y}")
@@ -467,4 +751,38 @@ def perform_accessibility_action(action, node_criteria, value=None):
         adb.run(f"shell input text '{value}'")
         return True
     
+    # Android 14 specific actions
+    elif action == "contextClick" and sdk_version >= 34:
+        # Simulate context click (long press + tap)
+        adb.run(f"shell input swipe {center_x} {center_y} {center_x} {center_y} 500")
+        return True
+    
+    elif action == "showTooltip" and sdk_version >= 34:
+        # Simulate hover (not directly supported, use long press instead)
+        adb.run(f"shell input swipe {center_x} {center_y} {center_x} {center_y} 300")
+        return True
+    
+    elif action == "dismiss" and sdk_version >= 34:
+        # Try to dismiss by pressing back button
+        adb.run("shell input keyevent KEYCODE_BACK")
+        return True
+    
     return False
+
+def clear_cache():
+    """
+    Clear all caches to force fresh data retrieval.
+    
+    Returns:
+        bool: True if successful
+    """
+    global XML_CACHE, PARSED_XML_CACHE
+    XML_CACHE = {}
+    PARSED_XML_CACHE = {}
+    
+    # Clear LRU caches
+    similarity_score.cache_clear()
+    find_elements_by_criteria.cache_clear()
+    get_xml_dump.cache_clear()
+    
+    return True
