@@ -1,10 +1,15 @@
 # My ADB Lib
 
-Thư viện Python wrapper cho Android Debug Bridge (ADB) với chức năng nhận diện hình ảnh sử dụng OpenCV.
+Thư viện Python wrapper cho Android Debug Bridge (ADB) với chức năng nhận diện hình ảnh sử dụng OpenCV và tính năng dump XML với hỗ trợ trợ năng.
 
 ## Giới thiệu
 
-My ADB Lib là một thư viện Python giúp tương tác với thiết bị Android thông qua ADB (Android Debug Bridge). Thư viện này được thiết kế để đơn giản hóa việc sử dụng các lệnh ADB trong các ứng dụng Python, tự động hóa kiểm thử, và quản lý thiết bị Android. Phiên bản mới nhất bổ sung chức năng nhận diện hình ảnh mạnh mẽ sử dụng OpenCV, cho phép tìm kiếm và tương tác với các phần tử trên màn hình dựa trên hình ảnh mẫu thay vì tọa độ cố định.
+My ADB Lib là một thư viện Python giúp tương tác với thiết bị Android thông qua ADB (Android Debug Bridge). Thư viện này được thiết kế để đơn giản hóa việc sử dụng các lệnh ADB trong các ứng dụng Python, tự động hóa kiểm thử, và quản lý thiết bị Android. 
+
+Phiên bản mới nhất bổ sung:
+- Chức năng nhận diện hình ảnh mạnh mẽ sử dụng OpenCV, cho phép tìm kiếm và tương tác với các phần tử trên màn hình dựa trên hình ảnh mẫu thay vì tọa độ cố định
+- Tính năng dump XML với local server, cho phép truy xuất và phân tích cấu trúc UI nhanh chóng
+- Hỗ trợ trợ năng (accessibility) để tương tác với ứng dụng Android một cách hiệu quả hơn
 
 ## Cấu trúc thư viện
 

@@ -1,13 +1,16 @@
+"""
+Commands module for My ADB Lib.
+"""
 
-from .app_info import *
-from .apps import *
-from .basic import *
-from .commands import *
-from .connect import *
-from .core import *
-from .device_actions import *
-from .device_info import *
-from .file_ops import *
-from .interaction import *
-from .logs import *
-from .permissions import *
+from . import app_info
+from . import apps
+from . import basic
+from . import connect
+from . import device_actions
+from . import device_info
+from . import file_ops
+from . import image_interaction
+from . import interaction
+from . import logs
+from . import permissions
+from . import xml_dump  # Add the new xml_dump module
