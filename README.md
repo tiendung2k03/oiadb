@@ -6,6 +6,32 @@ Thư viện Python wrapper cho Android Debug Bridge (ADB) với chức năng nh�
 
 My ADB Lib là một thư viện Python giúp tương tác với thiết bị Android thông qua ADB (Android Debug Bridge). Thư viện này được thiết kế để đơn giản hóa việc sử dụng các lệnh ADB trong các ứng dụng Python, tự động hóa kiểm thử, và quản lý thiết bị Android. Phiên bản mới nhất bổ sung chức năng nhận diện hình ảnh mạnh mẽ sử dụng OpenCV, cho phép tìm kiếm và tương tác với các phần tử trên màn hình dựa trên hình ảnh mẫu thay vì tọa độ cố định.
 
+## Cấu trúc thư viện
+
+Dưới đây là sơ đồ cấu trúc của thư viện OIADB:
+
+![Cấu trúc thư viện OIADB](docs/images/package_structure.png)
+
+Thư viện được tổ chức thành các module chính:
+- **MyADB**: Lớp chính để tương tác với ADB
+- **commands**: Chứa các lệnh chuyên biệt như tương tác, quản lý ứng dụng, thao tác file
+- **utils**: Các tiện ích và công cụ hỗ trợ
+- **exceptions**: Định nghĩa các ngoại lệ đặc biệt của thư viện
+
+## Quy trình nhận diện hình ảnh
+
+Một trong những tính năng nổi bật của OIADB là khả năng nhận diện và tương tác với các phần tử trên màn hình dựa trên hình ảnh. Dưới đây là quy trình hoạt động của tính năng này:
+
+![Quy trình nhận diện hình ảnh](docs/images/image_recognition_workflow.png)
+
+Quy trình bao gồm các bước:
+1. **Input Image**: Hình ảnh mẫu cần tìm kiếm
+2. **Screen Capture**: Chụp màn hình thiết bị hiện tại
+3. **Image Processing**: Tiền xử lý hình ảnh (chuyển đổi grayscale, thay đổi kích thước, chuẩn hóa)
+4. **Template Matching**: Sử dụng thuật toán so khớp mẫu của OpenCV
+5. **Match Detection**: Xác định tọa độ của các vị trí khớp tốt nhất
+6. **Device Interaction**: Thực hiện các thao tác như nhấn, vuốt tại vị trí đã xác định
+
 ## Yêu cầu
 
 - Python 3.6 trở lên
