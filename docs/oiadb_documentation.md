@@ -1,5 +1,7 @@
 # OIADB - Tài liệu hướng dẫn chi tiết
 
+<img src="/docs/images/architecture.png">
+
 ## Mục lục
 
 1. [Giới thiệu](#1-giới-thiệu)
