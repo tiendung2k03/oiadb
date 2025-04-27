@@ -20,6 +20,33 @@ Tính năng XML Dump bao gồm các thành phần chính:
 3. **Accessibility Integration**: Tích hợp với API trợ năng của Android
 4. **Parameter Handling**: Xử lý nhiều tham số để tìm kiếm và tương tác nhanh hơn
 
+Dưới đây là sơ đồ kiến trúc của tính năng XML Dump:
+
+![Kiến trúc XML Dump](docs/images/xml_dump_architecture.png)
+
+Sơ đồ trên minh họa cách các thành phần tương tác với nhau:
+- **Local Server** cung cấp các API endpoints
+- **XML Parser** xử lý và phân tích dữ liệu XML
+- **Parameter Handler** xử lý các tham số truy vấn
+- **UI Hierarchy** đại diện cho cấu trúc UI của ứng dụng Android
+- **Accessibility API** cho phép tương tác với các phần tử UI
+- **Client Application** là ứng dụng sử dụng XML dump API
+
+## Quy trình xử lý
+
+Tính năng XML Dump có ba luồng xử lý chính:
+
+1. **XML Dump Flow**: Truy xuất và lọc cấu trúc XML
+2. **Find Elements Flow**: Tìm kiếm các phần tử UI dựa trên tiêu chí
+3. **Accessibility Flow**: Thực hiện các hành động trợ năng
+
+![Quy trình XML Dump](docs/images/xml_dump_workflow.png)
+
+Sơ đồ trên minh họa chi tiết các bước trong mỗi luồng xử lý:
+- Luồng XML Dump bắt đầu từ HTTP Request và kết thúc bằng HTTP Response
+- Luồng Find Elements bao gồm việc tìm kiếm, so khớp mờ và trả về kết quả dạng JSON
+- Luồng Accessibility bao gồm truy vấn, phát hiện và thực thi các hành động trợ năng
+
 ## Các API Endpoint
 
 ### 1. `/get_xml`

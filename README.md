@@ -37,6 +37,28 @@ Quy trình bao gồm các bước:
 5. **Match Detection**: Xác định tọa độ của các vị trí khớp tốt nhất
 6. **Device Interaction**: Thực hiện các thao tác như nhấn, vuốt tại vị trí đã xác định
 
+## Tính năng XML Dump và Trợ Năng
+
+Tính năng mới nhất của OIADB là khả năng dump XML của giao diện người dùng Android và tương tác thông qua API trợ năng. Dưới đây là kiến trúc của tính năng này:
+
+![Kiến trúc XML Dump](docs/images/xml_dump_architecture.png)
+
+Kiến trúc bao gồm:
+- **Local Server**: HTTP server chạy trên thiết bị Android
+- **XML Parser**: Bộ phân tích XML với khả năng lọc nhanh
+- **Parameter Handler**: Xử lý các tham số truy vấn
+- **API Endpoints**: Các điểm cuối API (/get_xml, /find_elements, /accessibility_actions)
+- **Accessibility API**: Tích hợp với API trợ năng của Android
+
+Quy trình xử lý của tính năng XML Dump:
+
+![Quy trình XML Dump](docs/images/xml_dump_workflow.png)
+
+Quy trình bao gồm ba luồng chính:
+1. **XML Dump Flow**: Truy xuất và lọc cấu trúc XML
+2. **Find Elements Flow**: Tìm kiếm các phần tử UI dựa trên tiêu chí
+3. **Accessibility Flow**: Thực hiện các hành động trợ năng
+
 ## Yêu cầu
 
 - Python 3.6 trở lên
@@ -126,6 +148,34 @@ if image_interaction.is_image_present("/path/to/element.png"):
 image_interaction.drag_image_to_image("/path/to/source.png", "/path/to/target.png")
 ```
 
+### Sử dụng XML Dump và Trợ Năng
+
+```python
+from oiadb.commands import xml_dump
+
+# Khởi động server XML dump
+server, server_thread = xml_dump.start_xml_server(port=8000)
+
+# Lấy XML dump của giao diện hiện tại
+xml_content = xml_dump.get_xml_dump()
+
+# Tìm phần tử với nhiều tiêu chí
+buttons = xml_dump.find_elements_by_criteria({
+    "class": "android.widget.Button",
+    "value": "Login",
+    "threshold": 0.7
+})
+
+# Thực hiện hành động trợ năng
+xml_dump.perform_accessibility_action(
+    "click", 
+    {"id": "button_login"}
+)
+
+# Dừng server khi hoàn tất
+xml_dump.stop_xml_server(server)
+```
+
 ### Quản lý file
 
 ```python
@@ -180,12 +230,14 @@ Các module lệnh chuyên biệt:
 - `file_ops`: Thao tác file
 - `interaction`: Tương tác với thiết bị
 - `image_interaction`: Tương tác dựa trên nhận diện hình ảnh
+- `xml_dump`: Dump XML và tương tác qua trợ năng
 - `logs`: Xem log thiết bị
 - `permissions`: Quản lý quyền
 
 ### Tài liệu bổ sung
 Đọc tài liệu [tại đây](https://github.com/tiendung102k3/oiadb/tree/main/docs)
 Để biết thêm chi tiết về chức năng nhận diện hình ảnh, vui lòng xem [image_recognition_documentation.md](https://github.com/tiendung102k3/oiadb/blob/main/image_recognition_documentation.md).
+Để biết thêm chi tiết về tính năng XML dump và trợ năng, vui lòng xem [xml_dump_documentation.md](https://github.com/tiendung102k3/oiadb/blob/main/xml_dump_documentation.md).
 
 ## Đóng góp
 
