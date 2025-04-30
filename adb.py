@@ -5,6 +5,8 @@ Lớp chính của thư viện My ADB Lib.
 import os
 import logging
 import subprocess
+import time
+import pkg_resources # To find bundled APK
 from typing import Optional, List, Dict, Any, Union
 
 from .exceptions import (
@@ -15,7 +17,14 @@ from .exceptions import (
 from .utils.advanced import CommandResult, ResultCache, DeviceMonitor, AsyncCommandExecutor
 
 # Thiết lập logging
-logger = logging.getLogger('my_adb_lib')
+logger = logging.getLogger("oiadb") # Changed logger name
+
+# Constants for the server
+SERVER_PACKAGE_NAME = "com.github.tiendung102k3.oiadb.server"
+SERVER_TEST_PACKAGE_NAME = SERVER_PACKAGE_NAME + ".test"
+SERVER_APK_FILENAME = "oiadb-server.apk"
+SERVER_CLASS_NAME = SERVER_PACKAGE_NAME + ".InstrumentedTest"
+SERVER_PORT = 9008 # Default port used by uiautomator2 server
 
 class MyADB:
     """
@@ -25,10 +34,12 @@ class MyADB:
         device_id (str): ID của thiết bị Android để tương tác
         cache_enabled (bool): Bật/tắt cache kết quả lệnh
         timeout (int): Thời gian chờ tối đa cho các lệnh (giây)
+        adb_path (str): Đường dẫn đến executable ADB
+        auto_start_server (bool): Tự động cài đặt và khởi động server khi khởi tạo
     """
     
     def __init__(self, device_id: Optional[str] = None, cache_enabled: bool = True, 
-                 timeout: int = 30, adb_path: Optional[str] = None):
+                 timeout: int = 30, adb_path: Optional[str] = None, auto_start_server: bool = True):
         """
         Khởi tạo đối tượng MyADB.
         
@@ -37,11 +48,13 @@ class MyADB:
             cache_enabled: Bật/tắt cache kết quả lệnh
             timeout: Thời gian chờ tối đa cho các lệnh (giây)
             adb_path: Đường dẫn tùy chỉnh đến executable ADB
+            auto_start_server: Tự động cài đặt và khởi động server khi khởi tạo
         """
         self.device_id = device_id
         self.timeout = timeout
         self.cache_enabled = cache_enabled
         self.adb_path = adb_path or "adb"
+        self.local_server_port = None # Port forwarded on local machine
         
         # Khởi tạo cache và executor
         self._cache = ResultCache() if cache_enabled else None
@@ -53,7 +66,188 @@ class MyADB:
         # Kiểm tra thiết bị nếu đã chỉ định
         if device_id:
             self._check_device()
-    
+        else:
+            # Try to get the first device if none specified
+            devices = self.get_devices_list()
+            if devices:
+                self.device_id = devices[0]
+                logger.info(f"No device ID specified, using first available device: {self.device_id}")
+                self._check_device() # Re-check with the selected device
+            else:
+                raise DeviceNotFoundError("No devices found connected.")
+
+        # Handle server setup
+        if auto_start_server:
+            self.setup_server()
+
+    def _get_server_apk_path(self) -> str:
+        """Locate the bundled server APK file."""
+        try:
+            # Use pkg_resources to find the file within the installed package
+            apk_path = pkg_resources.resource_filename("oiadb", f"server/{SERVER_APK_FILENAME}")
+            if not os.path.exists(apk_path):
+                 raise FileNotFoundError(f"Bundled APK not found at expected location: {apk_path}")
+            logger.debug(f"Found server APK at: {apk_path}")
+            return apk_path
+        except Exception as e:
+            raise ADBError(f"Could not locate bundled server APK: {e}")
+
+    def _get_app_version_code(self, package_name: str) -> Optional[int]:
+        """Get the version code of an installed package."""
+        try:
+            output = self.run(f"shell dumpsys package {package_name}")
+            for line in output.splitlines():
+                if "versionCode=" in line:
+                    # Example line: versionCode=10 targetSdk=32
+                    parts = line.split()
+                    for part in parts:
+                        if part.startswith("versionCode="):
+                            return int(part.split("=")[1])
+            return None # Package found but versionCode not parsed
+        except (ADBCommandError, PackageNotFoundError):
+            return None # Package not found
+
+    def _install_server(self) -> None:
+        """Install or update the oiadb-server APK on the device."""
+        apk_path = self._get_server_apk_path()
+        target_apk_path = f"/data/local/tmp/{SERVER_APK_FILENAME}"
+        
+        # Get version code of bundled APK (requires parsing the APK, complex)
+        # For simplicity, we'll rely on checking installed versions first.
+        # A more robust solution would parse the bundled APK's manifest.
+        
+        installed_server_version = self._get_app_version_code(SERVER_PACKAGE_NAME)
+        installed_test_version = self._get_app_version_code(SERVER_TEST_PACKAGE_NAME)
+
+        # For now, let's always try to install/update if versions are missing or seem old.
+        # A simple check: if either package is missing, install.
+        # A better check would compare version codes if we could get the bundled APK's version.
+        if installed_server_version is None or installed_test_version is None:
+            logger.info("oiadb-server not fully installed. Installing...")
+            try:
+                # Push APK to device
+                self.push_file(apk_path, target_apk_path)
+                # Install APK
+                # Use -t to allow installing test packages, -r to replace, -g to grant permissions
+                install_output = self.run(f"shell pm install -t -r -g {target_apk_path}")
+                if "Success" not in install_output:
+                    raise InstallationError(SERVER_PACKAGE_NAME, f"Install command failed: {install_output}")
+                logger.info("oiadb-server installed successfully.")
+                # Clean up temporary file
+                self.run(f"shell rm {target_apk_path}")
+            except (FileOperationError, ADBCommandError, InstallationError) as e:
+                raise ADBError(f"Failed to install oiadb-server: {e}")
+        else:
+            logger.info("oiadb-server already installed.") # Add version check later
+
+    def _is_server_running(self) -> bool:
+        """Check if the instrumentation server process is running."""
+        try:
+            # Check running instrumentations
+            output = self.run("shell ps -A | grep com.github.tiendung102k3.oiadb.server")
+            # Check if the specific instrumentation runner is active
+            # A more reliable check might involve querying the server port
+            return SERVER_PACKAGE_NAME in output
+        except ADBCommandError:
+            return False # Error likely means it's not running
+
+    def _start_server(self) -> None:
+        """Start the oiadb-server instrumentation."""
+        if self._is_server_running():
+            logger.info("oiadb-server instrumentation is already running.")
+            return
+
+        logger.info("Starting oiadb-server instrumentation...")
+        try:
+            # Start the instrumentation in the background
+            # Use am instrument -w to wait for startup, but run in background (&)
+            # The actual server runs as part of the test runner
+            command = f"shell am instrument -w -r -e debug false -e class {SERVER_CLASS_NAME} {SERVER_TEST_PACKAGE_NAME}/androidx.test.runner.AndroidJUnitRunner"
+            # Run async without waiting for full command completion here, as it blocks
+            # We just need to start it. We'll check port forwarding later.
+            process = subprocess.Popen(
+                [self.adb_path, "-s", self.device_id] + command.split()[1:],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            # Wait a moment for the server to potentially start
+            time.sleep(5) 
+            # Check if process started okay (doesn't guarantee server is fully ready)
+            if process.poll() is not None and process.returncode != 0:
+                 stderr_output = process.stderr.read()
+                 raise ADBError(f"Failed to start server instrumentation. Error: {stderr_output}")
+            logger.info("Sent command to start oiadb-server.")
+            # Add a check here to confirm server is listening? Requires port forward first.
+        except Exception as e:
+            raise ADBError(f"Failed to start oiadb-server: {e}")
+
+    def _setup_port_forwarding(self) -> None:
+        """Setup ADB port forwarding for the server."""
+        # Find an available local port (simple approach, might have race conditions)
+        import socket
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("127.0.0.1", 0))
+            self.local_server_port = s.getsockname()[1]
+        
+        logger.info(f"Forwarding local port {self.local_server_port} to device port {SERVER_PORT}")
+        try:
+            # Remove existing forwards for the device port first
+            self.run(f"forward --remove tcp:{SERVER_PORT}", use_cache=False)
+        except ADBCommandError:
+            pass # Ignore error if no forward existed
+        try:
+            # Setup the new forward
+            self.run(f"forward tcp:{self.local_server_port} tcp:{SERVER_PORT}", use_cache=False)
+            # Verify forward (optional but good practice)
+            forward_list = self.run("forward --list", use_cache=False)
+            if f"{self.device_id} tcp:{self.local_server_port} tcp:{SERVER_PORT}" not in forward_list:
+                raise ADBError("Failed to verify port forwarding setup.")
+            logger.info("Port forwarding setup complete.")
+            # Now, try to connect to the server to confirm it's running
+            self._check_server_connection()
+        except ADBCommandError as e:
+            raise ADBError(f"Failed to setup port forwarding: {e}")
+
+    def _check_server_connection(self) -> None:
+        """Check if the server is responding on the forwarded port."""
+        if not self.local_server_port:
+            raise ADBError("Port forwarding not set up.")
+        
+        import requests
+        server_url = f"http://127.0.0.1:{self.local_server_port}/ping"
+        max_retries = 5
+        retry_delay = 2
+        for attempt in range(max_retries):
+            try:
+                logger.debug(f"Pinging server at {server_url} (attempt {attempt + 1}/{max_retries})")
+                response = requests.get(server_url, timeout=5)
+                response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
+                if response.ok:
+                    logger.info("Successfully connected to oiadb-server.")
+                    return
+            except requests.exceptions.RequestException as e:
+                logger.warning(f"Server ping failed: {e}. Retrying in {retry_delay}s...")
+                time.sleep(retry_delay)
+            except Exception as e:
+                 logger.error(f"Unexpected error checking server connection: {e}")
+                 break # Don't retry on unexpected errors
+        
+        raise ADBError(f"Failed to connect to oiadb-server at {server_url} after {max_retries} attempts.")
+
+    def setup_server(self) -> None:
+        """Install, start, and setup port forwarding for the oiadb-server."""
+        try:
+            self._install_server()
+            self._start_server()
+            self._setup_port_forwarding()
+            # Connection check is done within _setup_port_forwarding
+        except ADBError as e:
+            logger.error(f"Server setup failed: {e}")
+            raise # Re-raise the exception
+
+    # --- Existing methods below --- 
+
     def _check_adb_installed(self) -> None:
         """
         Kiểm tra ADB đã được cài đặt và có thể truy cập.
@@ -104,7 +298,7 @@ class MyADB:
         """
         # Kiểm tra cache
         cache_key = f"{self.device_id}:{command}" if self.device_id else command
-        if self.cache_enabled and use_cache:
+        if self.cache_enabled and use_cache and self._cache:
             cached_result = self._cache.get(cache_key)
             if cached_result:
                 logger.debug(f"Using cached result for command: {command}")
@@ -118,40 +312,153 @@ class MyADB:
         
         # Thực thi lệnh
         try:
-            logger.debug(f"Executing command: {' '.join(full_command)}")
+            logger.debug(f"Executing command: {" ".join(full_command)}")
             result = subprocess.run(
                 full_command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                timeout=self.timeout
+                timeout=self.timeout,
+                check=False # Don't raise CalledProcessError automatically
             )
             
             if result.returncode != 0:
+                # Handle specific known non-fatal errors if necessary
+                # Example: adb forward --remove error when forward doesn't exist
+                if "cannot remove listener" in result.stderr and "forward --remove" in command:
+                    logger.debug(f"Ignoring error for 'forward --remove': {result.stderr.strip()}")
+                    return result.stdout # Return stdout even if stderr had this specific error
+                
                 raise ADBCommandError(
-                    command=' '.join(full_command),
+                    command=" ".join(full_command),
                     error_message=result.stderr,
                     return_code=result.returncode
                 )
             
             # Lưu vào cache nếu thành công
-            if self.cache_enabled and use_cache:
+            if self.cache_enabled and use_cache and self._cache:
                 self._cache.set(cache_key, result.stdout)
             
             return result.stdout
         
         except subprocess.TimeoutExpired:
             raise ADBCommandError(
-                command=' '.join(full_command),
+                command=" ".join(full_command),
                 error_message=f"Command timed out after {self.timeout} seconds"
             )
         except Exception as e:
             if isinstance(e, ADBCommandError):
                 raise
             raise ADBCommandError(
-                command=' '.join(full_command),
+                command=" ".join(full_command),
                 error_message=str(e)
             )
+
+    # --- Placeholder for server interaction method --- 
+    def _server_rpc_call(self, method: str, params: Optional[list] = None) -> Any:
+        """Send a JSON-RPC call to the oiadb-server."""
+        if not self.local_server_port:
+            raise ADBError("Server not setup or port forwarding failed.")
+
+        import requests
+        import json
+
+        server_url = f"http://127.0.0.1:{self.local_server_port}/jsonrpc/0"
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 1, # Simple ID for now
+            "method": method,
+            "params": params if params is not None else []
+        }
+        headers = {"Content-Type": "application/json"}
+
+        try:
+            logger.debug(f"RPC call to {server_url}: method={method}, params={params}")
+            response = requests.post(server_url, headers=headers, json=payload, timeout=self.timeout)
+            response.raise_for_status()
+            result_data = response.json()
+
+            if "error" in result_data:
+                error_info = result_data["error"]
+                logger.error(f"RPC error: {error_info.get("message", "Unknown error")}")
+                # Map server errors to Python exceptions if needed
+                raise ADBCommandError(command=f"RPC:{method}", error_message=error_info.get("message", "Unknown RPC error"))
+            
+            return result_data.get("result")
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"RPC connection error: {e}")
+            # Attempt to restart server or re-establish connection?
+            raise ADBError(f"Failed to communicate with oiadb-server: {e}")
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to decode RPC response: {e}. Response text: {response.text[:100]}...")
+            raise ADBError("Invalid response from oiadb-server.")
+        except Exception as e:
+            logger.error(f"Unexpected error during RPC call: {e}")
+            raise ADBError(f"Unexpected RPC error: {e}")
+
+    # --- Modify existing methods or add new ones to use RPC --- 
+
+    # Example: Modify take_screenshot to use server
+    def take_screenshot(self, output_path: str) -> bool:
+        """
+        Chụp ảnh màn hình thiết bị và lưu vào đường dẫn.
+        Uses the oiadb-server if available.
+        
+        Args:
+            output_path: Đường dẫn lưu ảnh (local path)
+            
+        Returns:
+            True if successful, False otherwise.
+        """
+        try:
+            # Server RPC call for screenshot (returns base64 encoded PNG)
+            base64_png = self._server_rpc_call("screenshot")
+            if base64_png:
+                import base64
+                try:
+                    png_data = base64.b64decode(base64_png)
+                    with open(output_path, "wb") as f:
+                        f.write(png_data)
+                    logger.info(f"Screenshot saved to {output_path}")
+                    return True
+                except (base64.binascii.Error, IOError) as e:
+                    logger.error(f"Failed to decode or save screenshot: {e}")
+                    return False
+            else:
+                logger.error("Server returned no data for screenshot.")
+                return False
+        except (ADBError, ADBCommandError) as e:
+            logger.warning(f"RPC screenshot failed: {e}. Falling back to ADB method.")
+            # Fallback to original ADB method
+            try:
+                remote_path = "/sdcard/screenshot_oiadb_fallback.png"
+                self.run(f"shell screencap -p {remote_path}", use_cache=False)
+                self.pull_file(remote_path, output_path)
+                self.run(f"shell rm {remote_path}", use_cache=False)
+                logger.info(f"Screenshot saved via ADB fallback to {output_path}")
+                return True
+            except (ADBCommandError, FileOperationError) as adb_e:
+                logger.error(f"ADB fallback screenshot failed: {adb_e}")
+                return False
+
+    # Example: Add a method to get UI hierarchy (dump) via server
+    def dump_hierarchy(self) -> Optional[str]:
+        """
+        Lấy cấu trúc UI hiện tại dưới dạng XML.
+        Uses the oiadb-server.
+        
+        Returns:
+            Chuỗi XML chứa cấu trúc UI, hoặc None nếu thất bại.
+        """
+        try:
+            xml_content = self._server_rpc_call("dumpWindowHierarchy")
+            return xml_content
+        except (ADBError, ADBCommandError) as e:
+            logger.error(f"Failed to dump hierarchy via server: {e}")
+            return None
+
+    # --- Keep other existing methods, modify if they can benefit from server --- 
     
     def run_async(self, command: str, callback=None) -> str:
         """
@@ -248,8 +555,8 @@ class MyADB:
             if not line.strip():
                 continue
             
-            parts = line.split('\t')
-            if len(parts) >= 2 and parts[1] == 'device':
+            parts = line.split("\t")
+            if len(parts) >= 2 and parts[1] == "device":
                 devices.append(parts[0])
         
         return devices
@@ -307,7 +614,8 @@ class MyADB:
             options.append("-g")
         
         try:
-            return self.run(f"install {' '.join(options)} {apk_path}")
+            # Add -t flag if installing test APKs might be needed, though server is not test-only
+            return self.run(f"install {" ".join(options)} {apk_path}")
         except ADBCommandError as e:
             raise InstallationError(apk_path, e.error_message)
     
@@ -328,8 +636,12 @@ class MyADB:
         options = ["-k"] if keep_data else []
         
         try:
-            return self.run(f"uninstall {' '.join(options)} {package_name}")
+            return self.run(f"uninstall {" ".join(options)} {package_name}")
         except ADBCommandError as e:
+            # Check if uninstall failed because package doesn't exist
+            if "not found" in e.error_message.lower():
+                 logger.warning(f"Attempted to uninstall non-existent package: {package_name}")
+                 return "Package not found"
             raise UninstallationError(package_name, e.error_message)
     
     def push_file(self, local_path: str, remote_path: str) -> str:
@@ -350,7 +662,7 @@ class MyADB:
             raise FileOperationError("push", local_path, remote_path, "File nguồn không tồn tại")
         
         try:
-            return self.run(f"push {local_path} {remote_path}")
+            return self.run(f"push \"{local_path}\" \"{remote_path}\"") # Added quotes for paths
         except ADBCommandError as e:
             raise FileOperationError("push", local_path, remote_path, e.error_message)
     
@@ -369,7 +681,7 @@ class MyADB:
             FileOperationError: Nếu thao tác thất bại
         """
         try:
-            return self.run(f"pull {remote_path} {local_path}")
+            return self.run(f"pull \"{remote_path}\" \"{local_path}\"") # Added quotes for paths
         except ADBCommandError as e:
             raise FileOperationError("pull", remote_path, local_path, e.error_message)
     
@@ -381,19 +693,28 @@ class MyADB:
             Dictionary chứa thông tin thiết bị
         """
         try:
+            # Use server RPC call if available for potentially richer info
+            # Example: info = self._server_rpc_call("deviceInfo")
+            # Fallback to getprop for now
             output = self.run("shell getprop")
             properties = {}
             
             for line in output.splitlines():
                 line = line.strip()
-                if not line or ': ' not in line:
+                if not line or ": " not in line:
                     continue
                 
-                key, value = line.split(': ', 1)
-                key = key.strip('[]')
-                value = value.strip('[]')
-                properties[key] = value
-            
+                # Handle format like [ro.product.brand]: [google]
+                if line.startswith("[") and "]: [" in line:
+                    key_part, value_part = line.split("]: [", 1)
+                    key = key_part[1:]
+                    value = value_part[:-1]
+                    properties[key] = value
+                # Handle simpler format if needed (though getprop usually uses the above)
+                # elif ": " in line:
+                #     key, value = line.split(": ", 1)
+                #     properties[key] = value
+
             return properties
         except ADBCommandError as e:
             logger.error(f"Error getting device info: {e}")
@@ -410,9 +731,16 @@ class MyADB:
         Returns:
             Kết quả lệnh
         """
+        # Consider using server's open.app method if available
         if activity:
-            return self.run(f"shell am start -n {package_name}/{activity}")
+            # Ensure activity name doesn't start with . if package is included
+            if activity.startswith("."):
+                 full_activity = package_name + activity
+            else:
+                 full_activity = activity # Assume full name provided
+            return self.run(f"shell am start -n {package_name}/{full_activity}")
         else:
+            # Use monkey for finding launcher activity (less reliable than server method)
             return self.run(f"shell monkey -p {package_name} -c android.intent.category.LAUNCHER 1")
     
     def stop_app(self, package_name: str) -> str:
@@ -425,6 +753,7 @@ class MyADB:
         Returns:
             Kết quả lệnh
         """
+        # Server might offer a more graceful stop?
         return self.run(f"shell am force-stop {package_name}")
     
     def clear_app_data(self, package_name: str) -> str:
@@ -439,7 +768,7 @@ class MyADB:
         """
         return self.run(f"shell pm clear {package_name}")
     
-    def get_app_version(self, package_name: str) -> str:
+    def get_app_version(self, package_name: str) -> Optional[str]: # Return Optional[str]
         """
         Lấy phiên bản của ứng dụng.
         
@@ -447,19 +776,26 @@ class MyADB:
             package_name: Tên package của ứng dụng
             
         Returns:
-            Phiên bản ứng dụng
+            Phiên bản ứng dụng (versionName) or None if not found.
             
         Raises:
-            PackageNotFoundError: Nếu package không tồn tại
+            PackageNotFoundError: If dumpsys command fails significantly.
         """
         try:
             output = self.run(f"shell dumpsys package {package_name}")
             for line in output.splitlines():
-                if "versionName" in line:
+                line = line.strip()
+                if line.startswith("versionName="):
                     return line.split("=", 1)[1].strip()
             
-            raise PackageNotFoundError(package_name)
-        except ADBCommandError:
+            # If loop finishes without finding versionName, package might exist but lack info
+            # Check if package exists at all
+            if not self.is_app_installed(package_name):
+                 raise PackageNotFoundError(package_name)
+            return None # Package exists, but versionName not found in dumpsys
+        except ADBCommandError as e:
+            # If dumpsys fails entirely, treat as package not found or inaccessible
+            logger.warning(f"dumpsys package {package_name} failed: {e}")
             raise PackageNotFoundError(package_name)
     
     def is_app_installed(self, package_name: str) -> bool:
@@ -473,42 +809,34 @@ class MyADB:
             True nếu ứng dụng đã được cài đặt, False nếu không
         """
         try:
+            # pm list packages returns 'package:<name>'
             output = self.run(f"shell pm list packages {package_name}")
-            return package_name in output
+            return f"package:{package_name}" in output
         except ADBCommandError:
             return False
     
-    def take_screenshot(self, output_path: str) -> str:
-        """
-        Chụp ảnh màn hình thiết bị.
-        
-        Args:
-            output_path: Đường dẫn lưu ảnh
-            
-        Returns:
-            Kết quả lệnh
-        """
-        remote_path = "/sdcard/screenshot.png"
-        self.run(f"shell screencap -p {remote_path}")
-        result = self.pull_file(remote_path, output_path)
-        self.run(f"shell rm {remote_path}")
-        return result
-    
+    # take_screenshot modified above to use RPC
+
     def record_screen(self, output_path: str, time_limit: int = 180, 
                      size: Optional[str] = None, bit_rate: Optional[int] = None) -> str:
         """
         Quay video màn hình thiết bị.
         
         Args:
-            output_path: Đường dẫn lưu video
-            time_limit: Giới hạn thời gian quay (giây)
+            output_path: Đường dẫn lưu video (local path)
+            time_limit: Giới hạn thời gian quay (giây), max 180
             size: Kích thước video (ví dụ: "1280x720")
             bit_rate: Bit rate (ví dụ: 4000000 cho 4Mbps)
             
         Returns:
-            ID của lệnh đang chạy
+            Message indicating success or failure.
+            
+        Raises:
+            FileOperationError: If pulling the file fails.
+            ADBCommandError: If screenrecord command fails.
         """
-        remote_path = "/sdcard/screenrecord.mp4"
+        remote_path = "/sdcard/screenrecord_oiadb.mp4"
+        time_limit = min(time_limit, 180) # Enforce max time limit for screenrecord
         
         command = f"shell screenrecord"
         if time_limit:
@@ -519,45 +847,40 @@ class MyADB:
             command += f" --bit-rate {bit_rate}"
         command += f" {remote_path}"
         
-        def callback(result):
-            if result.success:
-                try:
-                    self.pull_file(remote_path, output_path)
-                    self.run(f"shell rm {remote_path}")
-                except Exception as e:
-                    logger.error(f"Error saving screen recording: {str(e)}")
-        
-        return self.run_async(command, callback)
-    
-    def tap(self, x: int, y: int) -> str:
+        try:
+            logger.info(f"Starting screen recording (max {time_limit}s)... Output: {output_path}")
+            # Run screenrecord and wait for it to finish (up to time_limit + buffer)
+            self.run(command, use_cache=False) # Timeout handled by self.run
+            
+            logger.info("Screen recording finished. Pulling file...")
+            self.pull_file(remote_path, output_path)
+            
+            # Clean up remote file
+            self.run(f"shell rm {remote_path}", use_cache=False)
+            
+            return f"Screen recording saved to {output_path}"
+        except (ADBCommandError, FileOperationError) as e:
+            logger.error(f"Screen recording failed: {e}")
+            # Attempt cleanup even if recording/pulling failed
+            try:
+                self.run(f"shell rm {remote_path}", use_cache=False)
+            except ADBCommandError:
+                pass # Ignore cleanup error
+            raise # Re-raise the original error
+
+    def input_keyevent(self, keycode: Union[int, str]) -> str:
         """
-        Nhấn vào vị trí cụ thể trên màn hình.
+        Gửi sự kiện nhấn phím.
         
         Args:
-            x: Tọa độ X
-            y: Tọa độ Y
+            keycode: Mã phím (ví dụ: 3 cho HOME, 4 cho BACK, "KEYCODE_HOME")
             
         Returns:
             Kết quả lệnh
         """
-        return self.run(f"shell input tap {x} {y}")
-    
-    def swipe(self, x1: int, y1: int, x2: int, y2: int, duration: int = 300) -> str:
-        """
-        Vuốt từ vị trí này đến vị trí khác.
-        
-        Args:
-            x1: Tọa độ X bắt đầu
-            y1: Tọa độ Y bắt đầu
-            x2: Tọa độ X kết thúc
-            y2: Tọa độ Y kết thúc
-            duration: Thời gian vuốt (ms)
-            
-        Returns:
-            Kết quả lệnh
-        """
-        return self.run(f"shell input swipe {x1} {y1} {x2} {y2} {duration}")
-    
+        # Consider using server's press method
+        return self.run(f"shell input keyevent {keycode}")
+
     def input_text(self, text: str) -> str:
         """
         Nhập văn bản.
@@ -568,199 +891,68 @@ class MyADB:
         Returns:
             Kết quả lệnh
         """
-        # Thay thế các ký tự đặc biệt
-        text = text.replace(" ", "%s").replace("'", "\\'").replace("\"", "\\\"")
-        return self.run(f"shell input text '{text}'")
-    
-    def press_key(self, key_code: int) -> str:
+        # Consider using server's input method (handles unicode better)
+        # Escape special characters for shell input
+        escaped_text = text.replace(" ", "%s").replace("\"", "\\\"").replace("(", "\\(").replace(")", "\\)").replace("<", "\\<").replace(">", "\\>").replace("{", "\\{").replace("}", "\\}").replace("&", "\\&").replace(";", "\\;").replace("|", "\\|").replace("$", "\\$").replace("`", "\\`")
+        return self.run(f"shell input text \"{escaped_text}\"")
+
+    def input_tap(self, x: int, y: int) -> str:
         """
-        Nhấn phím.
+        Chạm vào tọa độ màn hình.
         
         Args:
-            key_code: Mã phím
+            x: Tọa độ X
+            y: Tọa độ Y
             
         Returns:
             Kết quả lệnh
         """
-        return self.run(f"shell input keyevent {key_code}")
-    
-    def press_back(self) -> str:
+        # Consider using server's click method
+        return self.run(f"shell input tap {x} {y}")
+
+    def input_swipe(self, x1: int, y1: int, x2: int, y2: int, duration: int = 300) -> str:
         """
-        Nhấn nút Back.
-        
-        Returns:
-            Kết quả lệnh
-        """
-        return self.press_key(4)
-    
-    def press_home(self) -> str:
-        """
-        Nhấn nút Home.
-        
-        Returns:
-            Kết quả lệnh
-        """
-        return self.press_key(3)
-    
-    def press_power(self) -> str:
-        """
-        Nhấn nút Power.
-        
-        Returns:
-            Kết quả lệnh
-        """
-        return self.press_key(26)
-    
-    def get_logcat(self, options: str = "") -> str:
-        """
-        Lấy log từ thiết bị.
+        Vuốt màn hình từ điểm (x1, y1) đến (x2, y2).
         
         Args:
-            options: Các tùy chọn logcat
+            x1, y1: Tọa độ bắt đầu
+            x2, y2: Tọa độ kết thúc
+            duration: Thời gian vuốt (ms)
             
         Returns:
             Kết quả lệnh
         """
-        return self.run(f"logcat {options}")
-    
-    def clear_logcat(self) -> str:
+        # Consider using server's swipe method
+        return self.run(f"shell input swipe {x1} {y1} {x2} {y2} {duration}")
+
+    def get_screen_size(self) -> Optional[Dict[str, int]]:
         """
-        Xóa buffer logcat.
+        Lấy kích thước màn hình (width, height).
         
         Returns:
-            Kết quả lệnh
-        """
-        return self.run("logcat -c")
-    
-    def get_battery_info(self) -> Dict[str, Any]:
-        """
-        Lấy thông tin pin.
-        
-        Returns:
-            Dictionary chứa thông tin pin
+            Dictionary {"width": w, "height": h} hoặc None nếu lỗi.
         """
         try:
-            output = self.run("shell dumpsys battery")
-            battery_info = {}
-            
-            for line in output.splitlines():
-                line = line.strip()
-                if not line or ': ' not in line:
-                    continue
-                
-                key, value = line.split(': ', 1)
-                try:
-                    # Thử chuyển đổi giá trị thành số
-                    value = int(value) if value.isdigit() else float(value) if '.' in value and value.replace('.', '').isdigit() else value
-                except:
-                    pass
-                
-                battery_info[key] = value
-            
-            return battery_info
-        except ADBCommandError as e:
-            logger.error(f"Error getting battery info: {e}")
-            return {}
-    
-    def get_screen_size(self) -> Dict[str, int]:
-        """
-        Lấy kích thước màn hình.
+            # Try server method first
+            info = self._server_rpc_call("deviceInfo")
+            if info and "displayWidth" in info and "displayHeight" in info:
+                return {"width": info["displayWidth"], "height": info["displayHeight"]}
+        except (ADBError, ADBCommandError) as e:
+            logger.warning(f"RPC get screen size failed: {e}. Falling back to ADB.")
         
-        Returns:
-            Dictionary chứa chiều rộng và chiều cao màn hình
-        """
+        # Fallback to ADB
         try:
             output = self.run("shell wm size")
-            for line in output.splitlines():
-                if "Physical size" in line:
-                    size = line.split(": ")[1]
-                    width, height = map(int, size.split("x"))
-                    return {"width": width, "height": height}
-            
-            return {"width": 0, "height": 0}
-        except Exception as e:
-            logger.error(f"Error getting screen size: {e}")
-            return {"width": 0, "height": 0}
-    
-    def connect_wireless(self, ip: str, port: int = 5555) -> str:
-        """
-        Kết nối đến thiết bị qua mạng không dây.
-        
-        Args:
-            ip: Địa chỉ IP của thiết bị
-            port: Cổng (mặc định là 5555)
-            
-        Returns:
-            Kết quả lệnh
-            
-        Raises:
-            DeviceConnectionError: Nếu kết nối thất bại
-        """
-        try:
-            result = self.run(f"connect {ip}:{port}")
-            if "connected" in result.lower():
-                # Cập nhật device_id nếu kết nối thành công
-                self.device_id = f"{ip}:{port}"
-                return result
-            else:
-                raise DeviceConnectionError(f"{ip}:{port}", result)
-        except ADBCommandError as e:
-            raise DeviceConnectionError(f"{ip}:{port}", e.error_message)
-    
-    def disconnect_wireless(self, ip: Optional[str] = None, port: int = 5555) -> str:
-        """
-        Ngắt kết nối thiết bị không dây.
-        
-        Args:
-            ip: Địa chỉ IP của thiết bị (None để ngắt kết nối tất cả)
-            port: Cổng (mặc định là 5555)
-            
-        Returns:
-            Kết quả lệnh
-        """
-        if ip:
-            return self.run(f"disconnect {ip}:{port}")
-        else:
-            return self.run("disconnect")
-    
-    def wireless_pair(self, ip: str, port: int, pairing_code: str) -> str:
-        """
-        Ghép nối thiết bị không dây với mã ghép nối (Android 11+).
-        
-        Args:
-            ip: Địa chỉ IP của thiết bị
-            port: Cổng ghép nối
-            pairing_code: Mã ghép nối
-            
-        Returns:
-            Kết quả lệnh
-        """
-        return self.run(f"pair {ip}:{port} {pairing_code}")
-    
-    def start_server(self) -> str:
-        """
-        Khởi động máy chủ ADB.
-        
-        Returns:
-            Kết quả lệnh
-        """
-        return self.run("start-server")
-    
-    def kill_server(self) -> str:
-        """
-        Dừng máy chủ ADB.
-        
-        Returns:
-            Kết quả lệnh
-        """
-        return self.run("kill-server")
-    
-    def get_device_monitor(self) -> DeviceMonitor:
-        """
-        Lấy đối tượng theo dõi thiết bị.
-        
-        Returns:
-            Đối tượng DeviceMonitor
-        """
-        monitor = DeviceMonitor()
-        return monitor
+            # Output: Physical size: 1080x1920 or Override size: 1080x1920
+            size_line = output.splitlines()[-1] # Get the last line
+            if ":" in size_line:
+                size_str = size_line.split(":")[1].strip()
+                width, height = map(int, size_str.split("x"))
+                return {"width": width, "height": height}
+            return None
+        except (ADBCommandError, ValueError, IndexError) as e:
+            logger.error(f"Failed to get screen size via ADB: {e}")
+            return None
+
+    # Add more methods as needed, prioritizing server RPC calls with ADB fallbacks
+
