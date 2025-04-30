@@ -63,8 +63,8 @@ Quy trình bao gồm ba luồng chính:
 
 - Python 3.6 trở lên
 - ADB đã được cài đặt và có trong PATH
+- OpenCV và NumPy (cài đặt tự động cùng thư viện)
 - **Lưu ý:** Thư viện sẽ tự động cài đặt và quản lý `oiadb-server.apk` trên thiết bị Android của bạn.
-- **Tùy chọn (cho nhận dạng ảnh):** OpenCV và NumPy (cần cài đặt riêng, xem phần Cài đặt).
 ## Cài đặt
 
 ```bash

@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='oiadb',
-    version='0.5.1',
+    version='0.5.2',
     packages=find_packages(),
     description='ADB Python wrapper library with enhanced functionality and image recognition',
     long_description=open('README.md').read(),
@@ -27,13 +27,9 @@ setup(
     python_requires='>=3.6',
     install_requires=[
         'requests>=2.20',
+        'opencv-python>=4.5.0',
+        'numpy>=1.19.0',
     ],
-    extras_require={
-        'image': [
-            'opencv-python>=4.5.0',
-            'numpy>=1.19.0',
-        ]
-    },
     include_package_data=True,
     package_data={
         'oiadb': ['server/oiadb-server.apk'],
