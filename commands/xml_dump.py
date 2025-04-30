@@ -10,7 +10,7 @@ import re
 import json
 import time
 import hashlib
-import lxml.etree as ET
+import xml.etree.ElementTree as ET
 from functools import lru_cache
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
@@ -262,13 +262,15 @@ def filter_xml_content(xml_content, resource_id="", text_value="", content_desc=
                 nodes_to_remove.append(node)
         
         # Remove non-matching nodes
+        # Build a parent map for standard ElementTree compatibility
+        parent_map = {c: p for p in root.iter() for c in p}
         for node in nodes_to_remove:
-            parent = node.getparent()
-            if parent is not None:
+            if node in parent_map:
+                parent = parent_map[node]
                 parent.remove(node)
         
         # Convert back to string
-        return ET.tostring(root, encoding='utf-8', pretty_print=True).decode('utf-8')
+        return ET.tostring(root, encoding='utf-8').decode('utf-8')
     
     except Exception as e:
         # Fallback to regex-based filtering if XML parsing fails

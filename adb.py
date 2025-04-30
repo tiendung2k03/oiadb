@@ -169,13 +169,14 @@ class MyADB:
                 [self.adb_path, "-s", self.device_id] + command.split()[1:],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True
+                # text=True # Removed for Python 3.6 compatibility
             )
             # Wait a moment for the server to potentially start
             time.sleep(5) 
             # Check if process started okay (doesn't guarantee server is fully ready)
             if process.poll() is not None and process.returncode != 0:
-                 stderr_output = process.stderr.read()
+                 stdout_bytes, stderr_bytes = process.communicate()
+                 stderr_output = stderr_bytes.decode(errors='ignore')
                  raise ADBError(f"Failed to start server instrumentation. Error: {stderr_output}")
             logger.info("Sent command to start oiadb-server.")
             # Add a check here to confirm server is listening? Requires port forward first.
@@ -260,12 +261,14 @@ class MyADB:
                 [self.adb_path, "version"], 
                 stdout=subprocess.PIPE, 
                 stderr=subprocess.PIPE,
-                text=True,
+                # text=True, # Removed for Python 3.6 compatibility
                 timeout=self.timeout
             )
+            stdout_str = result.stdout.decode(errors='ignore')
+            stderr_str = result.stderr.decode(errors='ignore')
             if result.returncode != 0:
-                raise ADBError(f"Không thể chạy ADB. Lỗi: {result.stderr}")
-            logger.debug(f"ADB version: {result.stdout.splitlines()[0]}")
+                raise ADBError(f"Không thể chạy ADB. Lỗi: {stderr_str}")
+            logger.debug(f"ADB version: {stdout_str.splitlines()[0]}")
         except FileNotFoundError:
             raise ADBError("ADB không được cài đặt hoặc không có trong PATH")
         except Exception as e:
@@ -312,34 +315,36 @@ class MyADB:
         
         # Thực thi lệnh
         try:
-            logger.debug(f"Executing command: {" ".join(full_command)}")
+            logger.debug("Executing command: {}".format(" ".join(full_command)))
             result = subprocess.run(
                 full_command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True,
+                # text=True, # Removed for Python 3.6 compatibility
                 timeout=self.timeout,
                 check=False # Don't raise CalledProcessError automatically
             )
+            stdout_str = result.stdout.decode(errors='ignore')
+            stderr_str = result.stderr.decode(errors='ignore')
             
             if result.returncode != 0:
                 # Handle specific known non-fatal errors if necessary
                 # Example: adb forward --remove error when forward doesn't exist
-                if "cannot remove listener" in result.stderr and "forward --remove" in command:
-                    logger.debug(f"Ignoring error for 'forward --remove': {result.stderr.strip()}")
-                    return result.stdout # Return stdout even if stderr had this specific error
+                if "cannot remove listener" in stderr_str and "forward --remove" in command:
+                    logger.debug(f"Ignoring error for 'forward --remove': {stderr_str.strip()}")
+                    return stdout_str # Return stdout even if stderr had this specific error
                 
                 raise ADBCommandError(
                     command=" ".join(full_command),
-                    error_message=result.stderr,
+                    error_message=stderr_str,
                     return_code=result.returncode
                 )
             
             # Lưu vào cache nếu thành công
             if self.cache_enabled and use_cache and self._cache:
-                self._cache.set(cache_key, result.stdout)
+                self._cache.set(cache_key, stdout_str)
             
-            return result.stdout
+            return stdout_str
         
         except subprocess.TimeoutExpired:
             raise ADBCommandError(
@@ -380,22 +385,22 @@ class MyADB:
 
             if "error" in result_data:
                 error_info = result_data["error"]
-                logger.error(f"RPC error: {error_info.get("message", "Unknown error")}")
+                logger.error("RPC error: {}".format(error_info.get("message", "Unknown error")))
                 # Map server errors to Python exceptions if needed
-                raise ADBCommandError(command=f"RPC:{method}", error_message=error_info.get("message", "Unknown RPC error"))
+                raise ADBCommandError(command="RPC:{}".format(method), error_message=error_info.get("message", "Unknown RPC error"))
             
             return result_data.get("result")
 
         except requests.exceptions.RequestException as e:
-            logger.error(f"RPC connection error: {e}")
+            logger.error("RPC connection error: {}".format(e))
             # Attempt to restart server or re-establish connection?
-            raise ADBError(f"Failed to communicate with oiadb-server: {e}")
+            raise ADBError("Failed to communicate with oiadb-server: {}".format(e))
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to decode RPC response: {e}. Response text: {response.text[:100]}...")
+            logger.error("Failed to decode RPC response: {}. Response text: {}...".format(e, response.text[:100]))
             raise ADBError("Invalid response from oiadb-server.")
         except Exception as e:
-            logger.error(f"Unexpected error during RPC call: {e}")
-            raise ADBError(f"Unexpected RPC error: {e}")
+            logger.error("Unexpected error during RPC call: {}".format(e))
+            raise ADBError("Unexpected RPC error: {}".format(e))
 
     # --- Modify existing methods or add new ones to use RPC --- 
 
@@ -615,7 +620,7 @@ class MyADB:
         
         try:
             # Add -t flag if installing test APKs might be needed, though server is not test-only
-            return self.run(f"install {" ".join(options)} {apk_path}")
+            return self.run("install {} {}".format(" ".join(options), apk_path))
         except ADBCommandError as e:
             raise InstallationError(apk_path, e.error_message)
     
@@ -636,11 +641,11 @@ class MyADB:
         options = ["-k"] if keep_data else []
         
         try:
-            return self.run(f"uninstall {" ".join(options)} {package_name}")
+            return self.run("uninstall {} {}".format(" ".join(options), package_name))
         except ADBCommandError as e:
             # Check if uninstall failed because package doesn't exist
             if "not found" in e.error_message.lower():
-                 logger.warning(f"Attempted to uninstall non-existent package: {package_name}")
+                 logger.warning("Attempted to uninstall non-existent package: {}".format(package_name))
                  return "Package not found"
             raise UninstallationError(package_name, e.error_message)
     

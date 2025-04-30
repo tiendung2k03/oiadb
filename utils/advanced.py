@@ -62,14 +62,16 @@ class AsyncCommandExecutor:
                     command,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    text=True
+                    # text=True # Removed for Python 3.6 compatibility
                 )
                 
                 with self._lock:
                     self.processes[command_id] = process
                 
                 try:
-                    stdout, stderr = process.communicate(timeout=timeout)
+                    stdout_bytes, stderr_bytes = process.communicate(timeout=timeout)
+                    stdout = stdout_bytes.decode(errors='ignore')
+                    stderr = stderr_bytes.decode(errors='ignore')
                     result = CommandResult(
                         command=' '.join(command),
                         stdout=stdout,
@@ -214,15 +216,16 @@ class DeviceMonitor:
                     ["adb", "devices"], 
                     stdout=subprocess.PIPE, 
                     stderr=subprocess.PIPE,
-                    text=True
+                    # text=True # Removed for Python 3.6 compatibility
                 )
+                stdout_str = process.stdout.decode(errors="ignore")
                 
                 if process.returncode != 0:
                     time.sleep(1)
                     continue
                 
                 # Phân tích danh sách thiết bị
-                lines = process.stdout.strip().split('\n')[1:]
+                lines = stdout_str.strip().split("\n")[1:]
                 current_devices = set()
                 
                 for line in lines:

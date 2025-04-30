@@ -1,15 +1,15 @@
 from setuptools import setup, find_packages
 
 setup(
-    name='oiadb',
-    version='0.5.3',
+    name="oiadb",
+    version="0.5.4", # Incremented version
     packages=find_packages(),
-    description='ADB Python wrapper library with enhanced functionality and image recognition',
-    long_description=open('README.md').read(),
-    long_description_content_type='text/markdown',
-    author='Tien Dung',
-    author_email='example@example.com',
-    url='https://github.com/tiendung102k3/oiadb',
+    description="ADB Python wrapper library with enhanced functionality and image recognition",
+    long_description=open("README.md").read(),
+    long_description_content_type="text/markdown",
+    author="Tien Dung",
+    author_email="example@example.com",
+    url="https://github.com/tiendung102k3/oiadb",
     classifiers=[
         "Development Status :: 4 - Beta",
         "Intended Audience :: Developers",
@@ -25,8 +25,8 @@ setup(
         "Topic :: Software Development :: Testing",
         "Topic :: Software Development :: Libraries",
     ],
-    keywords='adb, android, debug, bridge, automation, testing, image recognition, opencv, uiautomator',
-    python_requires='>=3.6',
+    keywords="adb, android, debug, bridge, automation, testing, image recognition, opencv, uiautomator",
+    python_requires=">=3.6",
     install_requires=[
         "requests>=2.20",
     ],
