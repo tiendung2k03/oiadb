@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="oiadb",
-    version="0.5.4", # Incremented version
+    version="0.5.5", # Simplified XML dump, fixed import error
     packages=find_packages(),
     description="ADB Python wrapper library with enhanced functionality and image recognition",
     long_description=open("README.md").read(),
