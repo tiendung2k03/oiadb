@@ -15,9 +15,10 @@ from .exceptions import (
     InstallationError, UninstallationError, FileOperationError
 )
 from .utils.advanced import CommandResult, ResultCache, DeviceMonitor, AsyncCommandExecutor
+from .utils.platform_utils import get_platform_info, ADBInstaller, PlatformInfo
 
 # Thiết lập logging
-logger = logging.getLogger("oiadb") # Changed logger name
+logger = logging.getLogger("oiadb")
 
 # Constants for the server
 SERVER_PACKAGE_NAME = "com.github.tiendung102k3.oiadb.server"
@@ -36,10 +37,12 @@ class MyADB:
         timeout (int): Thời gian chờ tối đa cho các lệnh (giây)
         adb_path (str): Đường dẫn đến executable ADB
         auto_start_server (bool): Tự động cài đặt và khởi động server khi khởi tạo
+        auto_install_adb (bool): Tự động tải xuống và cài đặt ADB nếu không tìm thấy
     """
     
     def __init__(self, device_id: Optional[str] = None, cache_enabled: bool = True, 
-                 timeout: int = 30, adb_path: Optional[str] = None, auto_start_server: bool = True):
+                 timeout: int = 30, adb_path: Optional[str] = None, auto_start_server: bool = True,
+                 auto_install_adb: bool = True):
         """
         Khởi tạo đối tượng MyADB.
         
@@ -49,12 +52,19 @@ class MyADB:
             timeout: Thời gian chờ tối đa cho các lệnh (giây)
             adb_path: Đường dẫn tùy chỉnh đến executable ADB
             auto_start_server: Tự động cài đặt và khởi động server khi khởi tạo
+            auto_install_adb: Tự động tải xuống và cài đặt ADB nếu không tìm thấy
         """
         self.device_id = device_id
         self.timeout = timeout
         self.cache_enabled = cache_enabled
-        self.adb_path = adb_path or "adb"
+        self.auto_install_adb = auto_install_adb
         self.local_server_port = None # Port forwarded on local machine
+        
+        # Lấy thông tin nền tảng
+        self.platform_info = get_platform_info()
+        
+        # Xác định đường dẫn ADB
+        self.adb_path = self._resolve_adb_path(adb_path)
         
         # Khởi tạo cache và executor
         self._cache = ResultCache() if cache_enabled else None
@@ -79,6 +89,46 @@ class MyADB:
         # Handle server setup
         if auto_start_server:
             self.setup_server()
+
+    def _resolve_adb_path(self, custom_path: Optional[str] = None) -> str:
+        """
+        Xác định đường dẫn đến ADB, tự động cài đặt nếu cần.
+        
+        Args:
+            custom_path: Đường dẫn tùy chỉnh đến ADB
+            
+        Returns:
+            Đường dẫn đến ADB
+            
+        Raises:
+            ADBError: Nếu không thể tìm thấy hoặc cài đặt ADB
+        """
+        # Sử dụng đường dẫn tùy chỉnh nếu được cung cấp
+        if custom_path:
+            if os.path.isfile(custom_path) and os.access(custom_path, os.X_OK):
+                logger.debug(f"Using custom ADB path: {custom_path}")
+                return custom_path
+            else:
+                logger.warning(f"Custom ADB path is invalid: {custom_path}")
+        
+        # Tìm ADB trong hệ thống
+        adb_path = self.platform_info.find_adb_path()
+        if adb_path:
+            logger.debug(f"Found ADB in system: {adb_path}")
+            return adb_path
+        
+        # Tự động cài đặt ADB nếu được bật
+        if self.auto_install_adb:
+            logger.info("ADB not found in system, attempting to install...")
+            installer = ADBInstaller()
+            adb_path = installer.install_adb()
+            if adb_path:
+                logger.info(f"ADB installed successfully: {adb_path}")
+                return adb_path
+        
+        # Sử dụng 'adb' và hy vọng nó có trong PATH
+        logger.warning("Could not find or install ADB, falling back to 'adb' command")
+        return "adb"
 
     def _get_server_apk_path(self) -> str:
         """Locate the bundled server APK file."""
@@ -110,7 +160,9 @@ class MyADB:
     def _install_server(self) -> None:
         """Install or update the oiadb-server APK on the device."""
         apk_path = self._get_server_apk_path()
-        target_apk_path = f"/data/local/tmp/{SERVER_APK_FILENAME}"
+        # Sử dụng đường dẫn tạm thời phù hợp với thiết bị
+        device_temp_dir = self.platform_info.get_device_temp_dir()
+        target_apk_path = f"{device_temp_dir}/{SERVER_APK_FILENAME}"
         
         # Get version code of bundled APK (requires parsing the APK, complex)
         # For simplicity, we'll rely on checking installed versions first.
@@ -163,14 +215,18 @@ class MyADB:
             # Use am instrument -w to wait for startup, but run in background (&)
             # The actual server runs as part of the test runner
             command = f"shell am instrument -w -r -e debug false -e class {SERVER_CLASS_NAME} {SERVER_TEST_PACKAGE_NAME}/androidx.test.runner.AndroidJUnitRunner"
-            # Run async without waiting for full command completion here, as it blocks
-            # We just need to start it. We'll check port forwarding later.
-            process = subprocess.Popen(
+            
+            # Sử dụng platform_utils để tạo đối số phù hợp với nền tảng
+            process_args = self.platform_info.create_process_args(
                 [self.adb_path, "-s", self.device_id] + command.split()[1:],
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                # text=True # Removed for Python 3.6 compatibility
+                stderr=subprocess.PIPE
             )
+            
+            # Run async without waiting for full command completion here, as it blocks
+            # We just need to start it. We'll check port forwarding later.
+            process = subprocess.Popen(**process_args)
+            
             # Wait a moment for the server to potentially start
             time.sleep(5) 
             # Check if process started okay (doesn't guarantee server is fully ready)
@@ -257,15 +313,18 @@ class MyADB:
             ADBError: Nếu ADB không được cài đặt hoặc không thể truy cập
         """
         try:
-            result = subprocess.run(
-                [self.adb_path, "version"], 
-                stdout=subprocess.PIPE, 
+            # Sử dụng platform_utils để tạo đối số phù hợp với nền tảng
+            process_args = self.platform_info.create_process_args(
+                [self.adb_path, "version"],
+                stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                # text=True, # Removed for Python 3.6 compatibility
                 timeout=self.timeout
             )
+            
+            result = subprocess.run(**process_args)
             stdout_str = result.stdout.decode(errors='ignore')
             stderr_str = result.stderr.decode(errors='ignore')
+            
             if result.returncode != 0:
                 raise ADBError(f"Không thể chạy ADB. Lỗi: {stderr_str}")
             logger.debug(f"ADB version: {stdout_str.splitlines()[0]}")
@@ -316,14 +375,17 @@ class MyADB:
         # Thực thi lệnh
         try:
             logger.debug("Executing command: {}".format(" ".join(full_command)))
-            result = subprocess.run(
+            
+            # Sử dụng platform_utils để tạo đối số phù hợp với nền tảng
+            process_args = self.platform_info.create_process_args(
                 full_command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                # text=True, # Removed for Python 3.6 compatibility
                 timeout=self.timeout,
                 check=False # Don't raise CalledProcessError automatically
             )
+            
+            result = subprocess.run(**process_args)
             stdout_str = result.stdout.decode(errors='ignore')
             stderr_str = result.stderr.decode(errors='ignore')
             
@@ -349,121 +411,15 @@ class MyADB:
         except subprocess.TimeoutExpired:
             raise ADBCommandError(
                 command=" ".join(full_command),
-                error_message=f"Command timed out after {self.timeout} seconds"
+                error_message=f"Command timed out after {self.timeout} seconds",
+                return_code=-1
             )
         except Exception as e:
-            if isinstance(e, ADBCommandError):
-                raise
             raise ADBCommandError(
                 command=" ".join(full_command),
-                error_message=str(e)
+                error_message=str(e),
+                return_code=-1
             )
-
-    # --- Placeholder for server interaction method --- 
-    def _server_rpc_call(self, method: str, params: Optional[list] = None) -> Any:
-        """Send a JSON-RPC call to the oiadb-server."""
-        if not self.local_server_port:
-            raise ADBError("Server not setup or port forwarding failed.")
-
-        import requests
-        import json
-
-        server_url = f"http://127.0.0.1:{self.local_server_port}/jsonrpc/0"
-        payload = {
-            "jsonrpc": "2.0",
-            "id": 1, # Simple ID for now
-            "method": method,
-            "params": params if params is not None else []
-        }
-        headers = {"Content-Type": "application/json"}
-
-        try:
-            logger.debug(f"RPC call to {server_url}: method={method}, params={params}")
-            response = requests.post(server_url, headers=headers, json=payload, timeout=self.timeout)
-            response.raise_for_status()
-            result_data = response.json()
-
-            if "error" in result_data:
-                error_info = result_data["error"]
-                logger.error("RPC error: {}".format(error_info.get("message", "Unknown error")))
-                # Map server errors to Python exceptions if needed
-                raise ADBCommandError(command="RPC:{}".format(method), error_message=error_info.get("message", "Unknown RPC error"))
-            
-            return result_data.get("result")
-
-        except requests.exceptions.RequestException as e:
-            logger.error("RPC connection error: {}".format(e))
-            # Attempt to restart server or re-establish connection?
-            raise ADBError("Failed to communicate with oiadb-server: {}".format(e))
-        except json.JSONDecodeError as e:
-            logger.error("Failed to decode RPC response: {}. Response text: {}...".format(e, response.text[:100]))
-            raise ADBError("Invalid response from oiadb-server.")
-        except Exception as e:
-            logger.error("Unexpected error during RPC call: {}".format(e))
-            raise ADBError("Unexpected RPC error: {}".format(e))
-
-    # --- Modify existing methods or add new ones to use RPC --- 
-
-    # Example: Modify take_screenshot to use server
-    def take_screenshot(self, output_path: str) -> bool:
-        """
-        Chụp ảnh màn hình thiết bị và lưu vào đường dẫn.
-        Uses the oiadb-server if available.
-        
-        Args:
-            output_path: Đường dẫn lưu ảnh (local path)
-            
-        Returns:
-            True if successful, False otherwise.
-        """
-        try:
-            # Server RPC call for screenshot (returns base64 encoded PNG)
-            base64_png = self._server_rpc_call("screenshot")
-            if base64_png:
-                import base64
-                try:
-                    png_data = base64.b64decode(base64_png)
-                    with open(output_path, "wb") as f:
-                        f.write(png_data)
-                    logger.info(f"Screenshot saved to {output_path}")
-                    return True
-                except (base64.binascii.Error, IOError) as e:
-                    logger.error(f"Failed to decode or save screenshot: {e}")
-                    return False
-            else:
-                logger.error("Server returned no data for screenshot.")
-                return False
-        except (ADBError, ADBCommandError) as e:
-            logger.warning(f"RPC screenshot failed: {e}. Falling back to ADB method.")
-            # Fallback to original ADB method
-            try:
-                remote_path = "/sdcard/screenshot_oiadb_fallback.png"
-                self.run(f"shell screencap -p {remote_path}", use_cache=False)
-                self.pull_file(remote_path, output_path)
-                self.run(f"shell rm {remote_path}", use_cache=False)
-                logger.info(f"Screenshot saved via ADB fallback to {output_path}")
-                return True
-            except (ADBCommandError, FileOperationError) as adb_e:
-                logger.error(f"ADB fallback screenshot failed: {adb_e}")
-                return False
-
-    # Example: Add a method to get UI hierarchy (dump) via server
-    def dump_hierarchy(self) -> Optional[str]:
-        """
-        Lấy cấu trúc UI hiện tại dưới dạng XML.
-        Uses the oiadb-server.
-        
-        Returns:
-            Chuỗi XML chứa cấu trúc UI, hoặc None nếu thất bại.
-        """
-        try:
-            xml_content = self._server_rpc_call("dumpWindowHierarchy")
-            return xml_content
-        except (ADBError, ADBCommandError) as e:
-            logger.error(f"Failed to dump hierarchy via server: {e}")
-            return None
-
-    # --- Keep other existing methods, modify if they can benefit from server --- 
     
     def run_async(self, command: str, callback=None) -> str:
         """
@@ -474,7 +430,7 @@ class MyADB:
             callback: Hàm callback khi lệnh hoàn thành
             
         Returns:
-            ID của lệnh đang chạy
+            ID của lệnh bất đồng bộ
         """
         # Tạo ID duy nhất cho lệnh
         import uuid
@@ -609,6 +565,9 @@ class MyADB:
         Raises:
             InstallationError: Nếu cài đặt thất bại
         """
+        # Chuẩn hóa đường dẫn
+        apk_path = self.platform_info.normalize_path(apk_path)
+        
         if not os.path.exists(apk_path):
             raise InstallationError(apk_path, "File APK không tồn tại")
         
@@ -663,11 +622,14 @@ class MyADB:
         Raises:
             FileOperationError: Nếu thao tác thất bại
         """
+        # Chuẩn hóa đường dẫn local
+        local_path = self.platform_info.normalize_path(local_path)
+        
         if not os.path.exists(local_path):
             raise FileOperationError("push", local_path, remote_path, "File nguồn không tồn tại")
         
         try:
-            return self.run(f"push \"{local_path}\" \"{remote_path}\"") # Added quotes for paths
+            return self.run(f"push \"{local_path}\" \"{remote_path}\"")
         except ADBCommandError as e:
             raise FileOperationError("push", local_path, remote_path, e.error_message)
     
@@ -685,8 +647,14 @@ class MyADB:
         Raises:
             FileOperationError: Nếu thao tác thất bại
         """
+        # Chuẩn hóa đường dẫn local
+        local_path = self.platform_info.normalize_path(local_path)
+        
+        # Đảm bảo thư mục cha tồn tại
+        os.makedirs(os.path.dirname(os.path.abspath(local_path)), exist_ok=True)
+        
         try:
-            return self.run(f"pull \"{remote_path}\" \"{local_path}\"") # Added quotes for paths
+            return self.run(f"pull \"{remote_path}\" \"{local_path}\"")
         except ADBCommandError as e:
             raise FileOperationError("pull", remote_path, local_path, e.error_message)
     
@@ -773,7 +741,7 @@ class MyADB:
         """
         return self.run(f"shell pm clear {package_name}")
     
-    def get_app_version(self, package_name: str) -> Optional[str]: # Return Optional[str]
+    def get_app_version(self, package_name: str) -> Optional[str]:
         """
         Lấy phiên bản của ứng dụng.
         
@@ -814,13 +782,70 @@ class MyADB:
             True nếu ứng dụng đã được cài đặt, False nếu không
         """
         try:
-            # pm list packages returns 'package:<name>'
+            # pm list packages returns 'package:<n>'
             output = self.run(f"shell pm list packages {package_name}")
             return f"package:{package_name}" in output
         except ADBCommandError:
             return False
     
-    # take_screenshot modified above to use RPC
+    def take_screenshot(self, output_path: Optional[str] = None, 
+                       as_bytes: bool = False) -> Union[str, bytes, None]:
+        """
+        Chụp ảnh màn hình thiết bị.
+        
+        Args:
+            output_path: Đường dẫn lưu ảnh (tùy chọn)
+            as_bytes: Trả về dữ liệu ảnh dưới dạng bytes thay vì lưu file
+            
+        Returns:
+            - Nếu output_path được cung cấp: Đường dẫn đến file ảnh đã lưu
+            - Nếu as_bytes=True: Dữ liệu ảnh dưới dạng bytes
+            - Nếu cả hai: None
+            
+        Raises:
+            ADBCommandError: Nếu lệnh thất bại
+            FileOperationError: Nếu không thể lưu file
+        """
+        # Sử dụng đường dẫn tạm thời phù hợp với thiết bị
+        device_temp_dir = self.platform_info.get_device_temp_dir()
+        remote_path = f"{device_temp_dir}/screenshot_oiadb.png"
+        
+        try:
+            # Chụp ảnh màn hình
+            self.run(f"shell screencap -p {remote_path}")
+            
+            if as_bytes:
+                # Lấy dữ liệu ảnh dưới dạng bytes
+                output = self.run(f"exec-out cat {remote_path}")
+                # Xóa file tạm trên thiết bị
+                self.run(f"shell rm {remote_path}")
+                return output.encode('latin-1')  # Convert to bytes
+            
+            if output_path:
+                # Chuẩn hóa đường dẫn output
+                output_path = self.platform_info.normalize_path(output_path)
+                
+                # Đảm bảo thư mục cha tồn tại
+                os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+                
+                # Lấy ảnh về máy tính
+                self.pull_file(remote_path, output_path)
+                # Xóa file tạm trên thiết bị
+                self.run(f"shell rm {remote_path}")
+                return output_path
+            
+            # Nếu không cần lưu file hoặc trả về bytes, xóa file tạm
+            self.run(f"shell rm {remote_path}")
+            return None
+        
+        except (ADBCommandError, FileOperationError) as e:
+            logger.error(f"Screenshot failed: {e}")
+            # Cố gắng xóa file tạm nếu có lỗi
+            try:
+                self.run(f"shell rm {remote_path}")
+            except ADBCommandError:
+                pass  # Bỏ qua lỗi khi xóa file tạm
+            raise
 
     def record_screen(self, output_path: str, time_limit: int = 180, 
                      size: Optional[str] = None, bit_rate: Optional[int] = None) -> str:
@@ -840,7 +865,16 @@ class MyADB:
             FileOperationError: If pulling the file fails.
             ADBCommandError: If screenrecord command fails.
         """
-        remote_path = "/sdcard/screenrecord_oiadb.mp4"
+        # Chuẩn hóa đường dẫn output
+        output_path = self.platform_info.normalize_path(output_path)
+        
+        # Đảm bảo thư mục cha tồn tại
+        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+        
+        # Sử dụng đường dẫn tạm thời phù hợp với thiết bị
+        device_temp_dir = self.platform_info.get_device_temp_dir()
+        remote_path = f"{device_temp_dir}/screenrecord_oiadb.mp4"
+        
         time_limit = min(time_limit, 180) # Enforce max time limit for screenrecord
         
         command = f"shell screenrecord"
@@ -955,9 +989,38 @@ class MyADB:
                 width, height = map(int, size_str.split("x"))
                 return {"width": width, "height": height}
             return None
-        except (ADBCommandError, ValueError, IndexError) as e:
-            logger.error(f"Failed to get screen size via ADB: {e}")
+        except (ADBCommandError, ValueError) as e:
+            logger.error(f"Failed to get screen size: {e}")
             return None
-
-    # Add more methods as needed, prioritizing server RPC calls with ADB fallbacks
-
+    
+    def _server_rpc_call(self, method: str, params: Optional[Dict[str, Any]] = None) -> Any:
+        """
+        Gọi phương thức RPC trên server.
+        
+        Args:
+            method: Tên phương thức
+            params: Tham số (tùy chọn)
+            
+        Returns:
+            Kết quả từ server
+            
+        Raises:
+            ADBError: Nếu không thể kết nối đến server
+        """
+        if not self.local_server_port:
+            raise ADBError("Server not connected. Call setup_server() first.")
+        
+        import requests
+        import json
+        
+        url = f"http://127.0.0.1:{self.local_server_port}/{method}"
+        params_dict = params or {}
+        
+        try:
+            response = requests.post(url, json=params_dict, timeout=30)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            raise ADBError(f"RPC call failed: {e}")
+        except json.JSONDecodeError:
+            raise ADBError("Invalid JSON response from server")

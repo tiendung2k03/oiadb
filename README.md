@@ -1,15 +1,17 @@
 # OI ADB
 
-Thư viện Python wrapper cho Android Debug Bridge (ADB) với chức năng nhận diện hình ảnh sử dụng OpenCV và tính năng dump XML với hỗ trợ trợ năng.
+Thư viện Python wrapper cho Android Debug Bridge (ADB) với chức năng nhận diện hình ảnh sử dụng OpenCV, tính năng dump XML với hỗ trợ trợ năng, và hỗ trợ đa nền tảng (Windows, Linux, macOS, Termux).
 
 ## Giới thiệu
 
 OI ADB là một thư viện Python giúp tương tác với thiết bị Android thông qua ADB (Android Debug Bridge). Thư viện này được thiết kế để đơn giản hóa việc sử dụng các lệnh ADB trong các ứng dụng Python, tự động hóa kiểm thử, và quản lý thiết bị Android. 
 
 Phiên bản mới nhất bổ sung:
-- Chức năng nhận diện hình ảnh mạnh mẽ sử dụng OpenCV, cho phép tìm kiếm và tương tác với các phần tử trên màn hình dựa trên hình ảnh mẫu thay vì tọa độ cố định
-- Tính năng dump XML với local server, cho phép truy xuất và phân tích cấu trúc UI nhanh chóng
-- Hỗ trợ trợ năng (accessibility) để tương tác với ứng dụng Android một cách hiệu quả hơn
+- **Hỗ trợ đa nền tảng**: Hoạt động mượt mà trên Windows, Linux, macOS và Termux
+- **Tự động phát hiện và cài đặt ADB**: Không cần cài đặt ADB thủ công
+- **Chức năng nhận diện hình ảnh** mạnh mẽ sử dụng OpenCV, cho phép tìm kiếm và tương tác với các phần tử trên màn hình dựa trên hình ảnh mẫu thay vì tọa độ cố định
+- **Tính năng dump XML** với local server, cho phép truy xuất và phân tích cấu trúc UI nhanh chóng
+- **Hỗ trợ trợ năng (accessibility)** để tương tác với ứng dụng Android một cách hiệu quả hơn
 
 ## Cấu trúc thư viện
 
@@ -20,7 +22,7 @@ Dưới đây là sơ đồ cấu trúc của thư viện OIADB:
 Thư viện được tổ chức thành các module chính:
 - **MyADB**: Lớp chính để tương tác với ADB
 - **commands**: Chứa các lệnh chuyên biệt như tương tác, quản lý ứng dụng, thao tác file
-- **utils**: Các tiện ích và công cụ hỗ trợ
+- **utils**: Các tiện ích và công cụ hỗ trợ, bao gồm hỗ trợ đa nền tảng
 - **exceptions**: Định nghĩa các ngoại lệ đặc biệt của thư viện
 
 ## Quy trình nhận diện hình ảnh
@@ -59,12 +61,27 @@ Quy trình bao gồm ba luồng chính:
 2. **Find Elements Flow**: Tìm kiếm các phần tử UI dựa trên tiêu chí
 3. **Accessibility Flow**: Thực hiện các hành động trợ năng
 
+## Hỗ trợ đa nền tảng
+
+OIADB hiện hỗ trợ đầy đủ các nền tảng sau:
+
+- **Windows**: Hỗ trợ đầy đủ, bao gồm tự động cài đặt ADB
+- **Linux**: Hỗ trợ đầy đủ, bao gồm tự động cài đặt ADB
+- **macOS**: Hỗ trợ đầy đủ, bao gồm tự động cài đặt ADB
+- **Termux (Android)**: Hỗ trợ đặc biệt, tự động cài đặt ADB thông qua package manager
+
+Thư viện tự động phát hiện nền tảng và điều chỉnh hành vi phù hợp, đảm bảo trải nghiệm nhất quán trên tất cả các hệ điều hành.
+
 ## Yêu cầu
 
 - Python 3.6 trở lên
-- ADB đã được cài đặt và có trong PATH
+- **Không cần cài đặt ADB thủ công**: Thư viện sẽ tự động tải xuống và cài đặt ADB nếu cần
 - **Lưu ý:** Thư viện sẽ tự động cài đặt và quản lý `oiadb-server.apk` trên thiết bị Android của bạn.
-- **Tùy chọn (cho nhận dạng ảnh):** OpenCV và NumPy (cần cài đặt riêng, xem phần Cài đặt).## Cài đặt
+- **Tùy chọn (cho nhận dạng ảnh):** OpenCV và NumPy (cần cài đặt riêng, xem phần Cài đặt).
+
+## Cài đặt
+
+### Cài đặt cơ bản
 
 ```bash
 pip install oiadb
@@ -76,6 +93,19 @@ Hoặc cài đặt từ mã nguồn:
 git clone https://github.com/tiendung102k3/oiadb
 cd oiadb
 pip install -e .
+```
+
+### Cài đặt với hỗ trợ nhận diện hình ảnh
+
+```bash
+pip install oiadb[image]
+```
+
+### Cài đặt trên Termux
+
+```bash
+pkg install python
+pip install oiadb
 ```
 
 ## Cách sử dụng
@@ -90,6 +120,9 @@ adb = MyADB()
 
 # Hoặc chỉ định thiết bị cụ thể
 adb = MyADB(device_id="emulator-5554")
+
+# Tắt tự động cài đặt ADB (nếu bạn đã cài đặt ADB)
+adb = MyADB(auto_install_adb=False)
 ```
 
 ### Các thao tác cơ bản
@@ -199,13 +232,105 @@ print(logcat_output)
 bugreport = logs.bugreport()
 ```
 
+## Hướng dẫn đa nền tảng
+
+### Windows
+
+1. **Cài đặt Python**: Tải và cài đặt Python từ [python.org](https://www.python.org/downloads/windows/)
+2. **Cài đặt OIADB**:
+   ```
+   pip install oiadb[image]
+   ```
+3. **Sử dụng**:
+   ```python
+   from oiadb import MyADB
+   adb = MyADB()  # Tự động tải và cài đặt ADB nếu cần
+   ```
+
+### Linux
+
+1. **Cài đặt Python và các gói phụ thuộc**:
+   ```
+   sudo apt-get update
+   sudo apt-get install python3 python3-pip python3-dev
+   ```
+2. **Cài đặt OIADB**:
+   ```
+   pip3 install oiadb[image]
+   ```
+3. **Sử dụng**:
+   ```python
+   from oiadb import MyADB
+   adb = MyADB()  # Tự động tải và cài đặt ADB nếu cần
+   ```
+
+### macOS
+
+1. **Cài đặt Python**: Sử dụng Homebrew hoặc tải từ [python.org](https://www.python.org/downloads/macos/)
+   ```
+   brew install python
+   ```
+2. **Cài đặt OIADB**:
+   ```
+   pip3 install oiadb[image]
+   ```
+3. **Sử dụng**:
+   ```python
+   from oiadb import MyADB
+   adb = MyADB()  # Tự động tải và cài đặt ADB nếu cần
+   ```
+
+### Termux (Android)
+
+1. **Cài đặt Termux**: Tải từ [F-Droid](https://f-droid.org/packages/com.termux/)
+2. **Cài đặt Python và các gói phụ thuộc**:
+   ```
+   pkg update
+   pkg install python clang python-dev
+   ```
+3. **Cài đặt OIADB**:
+   ```
+   pip install oiadb
+   ```
+4. **Sử dụng**:
+   ```python
+   from oiadb import MyADB
+   adb = MyADB()  # Tự động cài đặt ADB thông qua package manager
+   ```
+
+## Xử lý sự cố đa nền tảng
+
+### Vấn đề chung
+
+- **ADB không tự động cài đặt**: Đảm bảo bạn có quyền ghi vào thư mục cài đặt. Trên Linux/macOS, có thể cần chạy với sudo.
+- **Lỗi kết nối thiết bị**: Đảm bảo USB debugging đã được bật trên thiết bị Android và thiết bị đã được cấp quyền.
+
+### Windows
+
+- **Lỗi đường dẫn**: Nếu gặp lỗi về đường dẫn, hãy sử dụng dấu gạch chéo ngược kép (`\\`) hoặc dấu gạch chéo thuận (`/`).
+- **ADB không hoạt động**: Kiểm tra xem Windows Defender hoặc phần mềm antivirus có chặn ADB không.
+
+### Linux
+
+- **Quyền USB**: Nếu không thể kết nối thiết bị, thêm quy tắc udev:
+  ```
+  sudo nano /etc/udev/rules.d/51-android.rules
+  # Thêm: SUBSYSTEM=="usb", ATTR{idVendor}=="XXXX", MODE="0666"
+  sudo udevadm control --reload-rules
+  ```
+
+### Termux
+
+- **Quyền truy cập**: Đảm bảo Termux có quyền truy cập bộ nhớ: `termux-setup-storage`
+- **ADB không hoạt động**: Trên Termux, ADB có thể cần quyền root để thực hiện một số thao tác.
+
 ## Tài liệu API
 
 ### Lớp MyADB
 
 Lớp chính để tương tác với ADB.
 
-- `__init__(device_id=None)`: Khởi tạo đối tượng ADB với ID thiết bị tùy chọn
+- `__init__(device_id=None, cache_enabled=True, timeout=30, adb_path=None, auto_start_server=True, auto_install_adb=True)`: Khởi tạo đối tượng ADB với các tùy chọn
 - `run(command)`: Chạy lệnh ADB tùy chỉnh
 - `get_devices()`: Liệt kê các thiết bị đã kết nối
 - `reboot_device()`: Khởi động lại thiết bị
@@ -231,6 +356,15 @@ Các module lệnh chuyên biệt:
 - `xml_dump`: Dump XML và tương tác qua trợ năng
 - `logs`: Xem log thiết bị
 - `permissions`: Quản lý quyền
+
+### Module utils
+
+Các tiện ích hỗ trợ:
+
+- `platform_utils`: Hỗ trợ đa nền tảng
+- `adb_manager`: Quản lý cài đặt và cấu hình ADB
+- `advanced`: Các tiện ích nâng cao
+- `image_recognition`: Nhận diện hình ảnh
 
 ### Tài liệu bổ sung
 Đọc tài liệu [tại đây](https://github.com/tiendung102k3/oiadb/tree/main/docs)

@@ -2,9 +2,9 @@ from setuptools import setup, find_packages
 
 setup(
     name="oiadb",
-    version="0.5.5", # Simplified XML dump, fixed import error
+    version="0.6.0", # Added multiplatform support, auto ADB installation
     packages=find_packages(),
-    description="ADB Python wrapper library with enhanced functionality and image recognition",
+    description="ADB Python wrapper library with enhanced functionality, image recognition and multiplatform support",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
     author="Tien Dung",
@@ -24,8 +24,11 @@ setup(
         "Programming Language :: Python :: 3.12",
         "Topic :: Software Development :: Testing",
         "Topic :: Software Development :: Libraries",
+        "Operating System :: Microsoft :: Windows",
+        "Operating System :: POSIX :: Linux",
+        "Operating System :: MacOS :: MacOS X",
     ],
-    keywords="adb, android, debug, bridge, automation, testing, image recognition, opencv, uiautomator",
+    keywords="adb, android, debug, bridge, automation, testing, image recognition, opencv, uiautomator, multiplatform, windows, linux, macos, termux",
     python_requires=">=3.6",
     install_requires=[
         "requests>=2.20",
@@ -45,4 +48,3 @@ setup(
         "Source": "https://github.com/tiendung102k3/oiadb",
     },
 )
-
