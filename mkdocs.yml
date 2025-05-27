@@ -1,0 +1,89 @@
+# MkDocs Configuration for OIADB Documentation
+
+site_name: OIADB Documentation
+site_url: https://oiadb.readthedocs.io/  # Replace with your actual Read the Docs URL
+site_author: tiendung102k3
+site_description: >
+  Python wrapper library for Android Debug Bridge (ADB) with enhanced functionality,
+  image recognition using OpenCV, XML dump with accessibility support,
+  and multi-platform support (Windows, Linux, macOS, Termux).
+
+# Repository
+repo_url: https://github.com/tiendung102k3/oiadb
+repo_name: tiendung102k3/oiadb
+edit_uri: edit/main/docs/  # Path to your docs source directory in the repo
+
+# Copyright
+copyright: Copyright &copy; 2024 Tiến Dũng
+
+# Theme
+theme:
+  name: material
+  language: en # Default language
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - toc.integrate
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.tabs.link
+    - content.code.annotation
+    - content.code.copy
+  palette:
+    - scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+# Extensions
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - toc:
+      permalink: true
+
+# Plugins for multi-language support
+plugins:
+  - search
+  - i18n:
+      docs_structure: suffix
+      languages:
+        - locale: en
+          default: true
+          name: English
+          build: true
+        - locale: vi
+          name: Tiếng Việt
+          build: true
+
+# Navigation Structure (Optional, MkDocs can infer from directory structure)
+# If you want explicit control, define nav here.
+# Example:
+# nav:
+#   - English:
+#     - Home: index.en.md
+#     - Installation: installation.en.md
+#     - ...
+#   - Tiếng Việt:
+#     - Trang chủ: index.vi.md
+#     - Cài đặt: installation.vi.md
+#     - ...
+
+# Extra CSS or JavaScript (Optional)
+extra_css:
+  - stylesheets/extra.css
+extra_javascript:
+  - javascripts/extra.js
+
